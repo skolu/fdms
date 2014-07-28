@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class FdmsTxnCode(Enum):
     Close = '0'
     Sale = '1'
@@ -22,7 +23,7 @@ class FdmsTransaction:
         pass
 
     def parse(self, data: bytes):
-        raise ValueError('Not implemented')
+        raise NotImplementedError('%s.parse' % self.__class__.__name__)
 
 
 class FdmsResponse:
@@ -35,10 +36,10 @@ class FdmsResponse:
         self.response_text = ''
 
     def body(self) -> bytes:
-        raise ValueError('Not implemented')
+        raise NotImplementedError('%s.body' % self.__class__.__name__)
 
     def response(self) -> bytes:
-        raise ValueError('Not implemented')
+        raise NotImplementedError('%s.response' % self.__class__.__name__)
 
 
 class FdmsHeader:
@@ -98,6 +99,8 @@ class DepositInquiryResponse(FdmsResponse):
     def __init__(self):
         super().__init__()
         self.batch_id_number = ''
+
+
 
 
 def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
