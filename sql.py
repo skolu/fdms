@@ -1,6 +1,7 @@
 from sqlalchemy import Table, MetaData, Column, Index, Integer, String, Boolean, DateTime, Float
 from sqlalchemy.orm import mapper
-from sqlalchemy import create_engine
+from sqlalchemy.orm.attributes import *
+from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker
 from enum import Enum
 
@@ -53,10 +54,18 @@ session = Session()
 mn = MerchantNumber(number='123456799765')
 session.add(mn)
 session.flush()
+
+session.expunge_all()
+
+mn.number='31432432'
+session.add(mn)
+session.flush()
+
+
 mh = MerchantHistory(id=mn.id)
 mh.history = 'dsadasdasdas'
 session.commit()
-query = session.query(MerchantNumber).filter(MerchantNumber.number.like('123%'))
+query = session.query(MerchantNumber).filter(MerchantNumber.number.like('31223%')).order_by(MerchantNumber.number.desc())
 r = query.all()
 print(r)
 session.close()

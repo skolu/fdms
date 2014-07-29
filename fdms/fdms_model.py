@@ -4,9 +4,9 @@ import datetime
 class Authorization:
     def __init__(self):
         self.id = None
+        self.number = ''
         self.is_credit = True
         self.card_hash = ''
-        self.number = ''
         self.date = datetime.datetime.now()
         self.amount = 0.0
 
@@ -16,11 +16,11 @@ class Authorization:
 
 
 class OpenBatch:
-    def __init__(self):
+    def __init__(self, merchant_number='', device_id='', batch_number=''):
         self.id = None
-        self.merchant_number = ''
-        self.device_id = ''
-        self.batch_number = ''
+        self.merchant_number = merchant_number
+        self.device_id = device_id
+        self.batch_number = batch_number
         self.date_open = datetime.datetime.now()
 
     def __repr__(self):
@@ -56,19 +56,34 @@ class BatchRecord:
         self.id = None
         self.batch_id = 0
         self.auth_id = 0
-        self.item_number = 0
-        self.revision_number = 0
+        self.item_no = ''
+        self.revision_no = ''
         self.txn_code = ''
         self.amount = 0.0
 
     def __repr__(self):
-        return "<BatchRecord(batch_id='%d', item_number='%s', revision_number='%s' txn_code='%s', amount='%.2f')>" % \
-               (self.batch_id, self.item_number, self.revision_number, self.txn_code, self.amount)
+        return "<BatchRecord(batch_id='%d', item_no='%s', revision_no='%s' txn_code='%s', amount='%.2f')>" % \
+               (self.batch_id, self.item_no, self.revision_no, self.txn_code, self.amount)
 
 
 class FdmsStorage:
     def __init__(self):
         pass
 
+    def save(self):
+        raise NotImplementedError('%s.save()' % self.__class__.__name__)
+
     def last_closed_batch(self, merchant_number, device_id) -> ClosedBatch:
         raise NotImplementedError('%s.last_closed_batch()' % self.__class__.__name__)
+
+    def get_open_batch(self, merchant_number, device_id) -> OpenBatch:
+        raise NotImplementedError('%s.get_open_batch()' % self.__class__.__name__)
+
+    def create_batch(self, merchant_number, device_id, batch_no) -> OpenBatch:
+        raise NotImplementedError('%s.create_batch()' % self.__class__.__name__)
+
+    def get_batch_record(self, batch_id: int, item_no: str) -> BatchRecord:
+        raise NotImplementedError('%s.get_batch_record()' % self.__class__.__name__)
+
+    def put_batch_record(self, batch_record: BatchRecord):
+        raise NotImplementedError('%s.put_batch_record()' % self.__class__.__name__)

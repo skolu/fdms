@@ -1,5 +1,7 @@
-from sqlalchemy import Table, MetaData, Column, Index, Integer, String, Boolean, DateTime, Float
+from sqlalchemy import MetaData, Table, Column, Index, Integer, String, Boolean, DateTime, Float, desc
 from sqlalchemy.orm import mapper
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from .fdms_model import *
 
@@ -29,7 +31,7 @@ mapper(Authorization, authorization_table, properties={
 open_batch_table = Table('OpenBatch', fdms_metadata,
                          Column('Id', Integer, primary_key=True, nullable=False),
                          Column('MerchantNumber', String(32), nullable=False),
-                         Column('DeviceId', String(8), nullable=False),
+                         Column('DeviceId', String(4), nullable=False),
                          Column('BatchNumber', String(8), nullable=False),
                          Column('DateOpen', DateTime, nullable=False),
                          Index('OpenBatch_Number_Idx', 'MerchantNumber', 'DeviceId', unique=True),
@@ -46,28 +48,28 @@ mapper(OpenBatch, open_batch_table, properties={
 closed_batch_table = Table('ClosedBatch', fdms_metadata,
                            Column('Id', Integer, primary_key=True, nullable=False),
                            Column('MerchantNumber', String(32), nullable=False),
-                           Column('DeviceId', String(8), nullable=False),
-                           Column('BatchNumber', String(8), nullable=False),
+                           Column('DeviceId', String(4), nullable=False),
+                           Column('BatchNumber', String(1), nullable=False),
                            Column('DateOpen', DateTime, nullable=False),
                            Column('DateClosed', DateTime, nullable=False),
-                           Column('CreditCount', DateTime, nullable=False),
-                           Column('DebitCount', DateTime, nullable=False),
+                           Column('CreditCount', Integer, nullable=False),
+                           Column('DebitCount', Integer, nullable=False),
                            Column('CreditAmount', Float, nullable=False),
                            Column('DebitAmount', Float, nullable=False),
-                           Index('OpenBatch_Number_Idx', 'MerchantNumber', 'DeviceId', 'DateClosed', unique=True),
+                           Index('ClosedBatch_Number_Idx', 'MerchantNumber', 'DeviceId', 'DateClosed'),
 )
 
 mapper(ClosedBatch, closed_batch_table, properties={
-    'id': open_batch_table.columns.Id,
-    'merchant_number': open_batch_table.columns.MerchantNumber,
-    'device_id': open_batch_table.columns.DeviceId,
-    'batch_number': open_batch_table.columns.BatchNumber,
-    'date_open': open_batch_table.columns.DateOpen,
-    'date_closed': open_batch_table.columns.DateClosed,
-    'credit_count': open_batch_table.columns.CreditCount,
-    'debit_count': open_batch_table.columns.DebitCount,
-    'credit_amount': open_batch_table.columns.CreditAmount,
-    'debit_amount': open_batch_table.columns.DebitAmount
+    'id': closed_batch_table.columns.Id,
+    'merchant_number': closed_batch_table.columns.MerchantNumber,
+    'device_id': closed_batch_table.columns.DeviceId,
+    'batch_number': closed_batch_table.columns.BatchNumber,
+    'date_open': closed_batch_table.columns.DateOpen,
+    'date_closed': closed_batch_table.columns.DateClosed,
+    'credit_count': closed_batch_table.columns.CreditCount,
+    'debit_count': closed_batch_table.columns.DebitCount,
+    'credit_amount': closed_batch_table.columns.CreditAmount,
+    'debit_amount': closed_batch_table.columns.DebitAmount
 })
 
 
@@ -75,11 +77,11 @@ batch_record_table = Table('BatchRecord', fdms_metadata,
                            Column('Id', Integer, primary_key=True, nullable=False),
                            Column('BatchId', Integer, nullable=False),
                            Column('AuthId', Integer, nullable=False),
-                           Column('ItemNumber', Integer, nullable=False),
-                           Column('RevNumber', Integer, nullable=False),
+                           Column('ItemNumber', String(3), nullable=False),
+                           Column('RevNumber', String(1), nullable=False),
                            Column('TxnCode', String(1), nullable=False),
                            Column('Amount', Float, nullable=False),
-                           Index('BatchRecord_BatchId_Idx', 'BatchId', unique=False),
+                           Index('BatchRecord_BatchId_Idx', 'BatchId', 'ItemNumber', unique=True),
                            Index('BatchRecord_AuthId_Idx', 'AuthId', unique=True),
                            sqlite_autoincrement=True)
 
@@ -87,15 +89,61 @@ mapper(BatchRecord, batch_record_table, properties={
     'id': batch_record_table.columns.Id,
     'batch_id': batch_record_table.columns.BatchId,
     'auth_id': batch_record_table.columns.AuthId,
-    'item_number': batch_record_table.columns.ItemNumber,
-    'revision_number': batch_record_table.columns.RevNumber,
+    'item_no': batch_record_table.columns.ItemNumber,
+    'revision_no': batch_record_table.columns.RevNumber,
     'txn_code': batch_record_table.columns.TxnCode,
     'amount': batch_record_table.columns.Amount
 })
 
 
+engine = create_engine('sqlite:///:memory:', echo=True)
+
+fdms_metadata.create_all(engine)
+
+Session = sessionmaker(bind=engine)
+
+
 class SqlFdmsStorage(FdmsStorage):
     def __init__(self):
         super().__init__()
+        self.session = None
+        ''':type: Session'''
+
+    def __enter__(self):
+        self.session = Session()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.session.close()
+        self.session = None
+
+    def save(self):
+        self.session.commit()
 
     def last_closed_batch(self, merchant_number, device_id):
+        query = self.session.query(ClosedBatch). \
+            filter(ClosedBatch.merchant_number == merchant_number, ClosedBatch.device_id == device_id). \
+            order_by(ClosedBatch.date_closed.desc())
+        return query.first()
+
+    def get_open_batch(self, merchant_number, device_id):
+        query = self.session.query(OpenBatch). \
+            filter(OpenBatch.merchant_number == merchant_number, OpenBatch.device_id == device_id)
+        return query.first()
+
+    def get_batch_record(self, batch_id, item_no):
+        query = self.session.query(BatchRecord). \
+            filter(BatchRecord.batch_id == batch_id, BatchRecord.item_no == item_no)
+        return query.first()
+
+    def put_batch_record(self, batch_record):
+        self.session.add(batch_record)
+        self.session.flush()
+
+    def create_batch(self, merchant_number, device_id, batch_no):
+        batch = OpenBatch(merchant_number=merchant_number, device_id=device_id, batch_no=batch_no)
+        self.session.add(batch)
+        self.session.flush()
+        return batch
+
+

@@ -215,6 +215,28 @@ def deposit_response_body(self: DepositInquiryResponse) -> bytes:
 DepositInquiryResponse.body = deposit_response_body
 
 
+def credit_response_body(self: CreditResponse) -> bytes:
+    rs = bytearray()
+    if len(self.avc_rs_code) > 0:
+        rs.append(self.avc_rs_code.encode()[0])
+    else:
+        rs.extend('0'.encode())
+    if len(self.cvv_rs_code) > 0:
+        rs.append(self.cvv_rs_code.encode()[0])
+    rs.append(FS)
+    rs.append(FS)
+    if len(self.transaction_id) > 0:
+        tid = self.transaction_id.encode()
+        if len(tid) > 15:
+            tid = tid[0:15]
+        rs.extend(tid)
+    rs.append(FS)
+
+    return rs
+
+CreditResponse.body = credit_response_body
+
+
 def parse_header(data: bytes) -> (int, FdmsHeader):
     pos = 0
     p_b = data[0]
