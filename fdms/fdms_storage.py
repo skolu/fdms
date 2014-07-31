@@ -1,7 +1,6 @@
 from sqlalchemy import MetaData, Table, Column, Index, Integer, String, Boolean, DateTime, Float, desc
-from sqlalchemy.orm import mapper
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import mapper, sessionmaker
 
 from .fdms_model import *
 
@@ -9,21 +8,23 @@ fdms_metadata = MetaData()
 
 authorization_table = Table('Authorization', fdms_metadata,
                             Column('Id', Integer, primary_key=True, nullable=False),
-                            Column('Number', String(8), nullable=False),
+                            Column('MerchantNumber', String(32), nullable=False),
+                            Column('AuthorizationCode', String(8), nullable=False),
                             Column('CardHash', String(32), nullable=False),
                             Column('IsCredit', Boolean, nullable=False, default=True),
-                            Column('IsSwiped', Boolean, nullable=False, default=True),
+                            Column('IsCaptured', Boolean, nullable=False, default=True),
                             Column('Date', DateTime, nullable=False),
                             Column('Amount', Float, nullable=False, default=0.0),
-                            Index('Authorization_Number_Idx', 'Number', unique=False),
+                            Index('Authorization_Number_Idx', 'MerchantNumber', 'AuthorizationCode', unique=False),
                             sqlite_autoincrement=True)
 
 mapper(Authorization, authorization_table, properties={
     'id': authorization_table.columns.Id,
-    'number': authorization_table.columns.Number,
+    'merchant_number': authorization_table.columns.MerchantNumber,
+    'authorization_code': authorization_table.columns.AuthorizationCode,
     'card_hash': authorization_table.columns.CardHash,
     'is_credit': authorization_table.columns.IsCredit,
-    'is_swiped': authorization_table.columns.IsSwiped,
+    'is_captured': authorization_table.columns.IsCaptured,
     'date': authorization_table.columns.Date,
     'amount': authorization_table.columns.Amount,
 })
@@ -80,6 +81,7 @@ batch_record_table = Table('BatchRecord', fdms_metadata,
                            Column('ItemNumber', String(3), nullable=False),
                            Column('RevNumber', String(1), nullable=False),
                            Column('TxnCode', String(1), nullable=False),
+                           Column('IsCredit', Boolean, nullable=False),
                            Column('Amount', Float, nullable=False),
                            Index('BatchRecord_BatchId_Idx', 'BatchId', 'ItemNumber', unique=True),
                            Index('BatchRecord_AuthId_Idx', 'AuthId', unique=True),
@@ -92,6 +94,7 @@ mapper(BatchRecord, batch_record_table, properties={
     'item_no': batch_record_table.columns.ItemNumber,
     'revision_no': batch_record_table.columns.RevNumber,
     'txn_code': batch_record_table.columns.TxnCode,
+    'is_credit': batch_record_table.columns.IsCredit,
     'amount': batch_record_table.columns.Amount
 })
 
@@ -107,7 +110,6 @@ class SqlFdmsStorage(FdmsStorage):
     def __init__(self):
         super().__init__()
         self.session = None
-        ''':type: Session'''
 
     def __enter__(self):
         self.session = Session()
@@ -131,6 +133,12 @@ class SqlFdmsStorage(FdmsStorage):
             filter(OpenBatch.merchant_number == merchant_number, OpenBatch.device_id == device_id)
         return query.first()
 
+    def create_batch(self, merchant_number, device_id, batch_no):
+        batch = OpenBatch(merchant_number=merchant_number, device_id=device_id, batch_no=batch_no)
+        self.session.add(batch)
+        self.session.flush()
+        return batch
+
     def get_batch_record(self, batch_id, item_no):
         query = self.session.query(BatchRecord). \
             filter(BatchRecord.batch_id == batch_id, BatchRecord.item_no == item_no)
@@ -140,10 +148,16 @@ class SqlFdmsStorage(FdmsStorage):
         self.session.add(batch_record)
         self.session.flush()
 
-    def create_batch(self, merchant_number, device_id, batch_no):
-        batch = OpenBatch(merchant_number=merchant_number, device_id=device_id, batch_no=batch_no)
-        self.session.add(batch)
+    def get_authorization(self, rec_id):
+        return self.session.query(Authorization).get(rec_id)
+
+    def put_authorization(self, authorization):
+        self.session.add(authorization)
         self.session.flush()
-        return batch
+
+    def query_authorization(self, merchant_number, authorization_code):
+        query = self.session.query(Authorization). \
+            filter(Authorization.merchant_number == merchant_number, Authorization.authorization_code == authorization_code)
+        return query.all()
 
 

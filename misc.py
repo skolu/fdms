@@ -12,7 +12,7 @@ class A:
         print('exit')
         self.a -= 1
 
-with A() as aa:
-    print(aa)
+B = A
 
-
+with B() as a:
+    print(a)

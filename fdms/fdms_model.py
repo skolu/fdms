@@ -1,18 +1,20 @@
 import datetime
-
+import hashlib
 
 class Authorization:
     def __init__(self):
         self.id = None
-        self.number = ''
+        self.merchant_number = ''
+        self.authorization_code = ''
         self.is_credit = True
+        self.is_captured = True
         self.card_hash = ''
         self.date = datetime.datetime.now()
         self.amount = 0.0
 
     def __repr__(self):
-        return "<Authorization(number='%s', date='%s', amount='%.2f')>" % \
-               (self.number, self.date, self.amount)
+        return "<%s(authorization_code='%s', date='%s', amount='%.2f')>" % \
+               (self.__class__.__name__, self.authorization_code, self.date, self.amount)
 
 
 class OpenBatch:
@@ -59,11 +61,12 @@ class BatchRecord:
         self.item_no = ''
         self.revision_no = ''
         self.txn_code = ''
+        self.is_credit = True
         self.amount = 0.0
 
     def __repr__(self):
-        return "<BatchRecord(batch_id='%d', item_no='%s', revision_no='%s' txn_code='%s', amount='%.2f')>" % \
-               (self.batch_id, self.item_no, self.revision_no, self.txn_code, self.amount)
+        return "<%s(batch_id='%d', item_no='%s', revision_no='%s' txn_code='%s', amount='%.2f')>" % \
+               (self.__class__.__name__, self.batch_id, self.item_no, self.revision_no, self.txn_code, self.amount)
 
 
 class FdmsStorage:
@@ -87,3 +90,44 @@ class FdmsStorage:
 
     def put_batch_record(self, batch_record: BatchRecord):
         raise NotImplementedError('%s.put_batch_record()' % self.__class__.__name__)
+
+    def query_authorization(self, merchant_number, authorization_code) -> list:
+        raise NotImplementedError('%s.query_authorization()' % self.__class__.__name__)
+
+    def get_authorization(self, rec_id) -> Authorization:
+        raise NotImplementedError('%s.get_authorization()' % self.__class__.__name__)
+
+    def put_authorization(self, authorization: Authorization):
+        raise NotImplementedError('%s.put_authorization()' % self.__class__.__name__)
+
+
+def card_info_md5(card_number: str, card_expiration: str):
+    h = hashlib.md5()
+    h.update(card_number.encode())
+    h.update(':'.encode())
+    h.update(card_expiration.encode())
+    return h.hexdigest().upper()
+
+
+def extract_track2(track: str) -> (str, str):
+    p1 = 0
+    if track[p1] == ';':
+        p1 += 1
+    p2 = track.index('=', p1)
+    p3 = p2 + 1
+    p4 = p3 + 4
+    return track[p1:p2], track[p3:p4]
+
+
+def extract_track1(track: str):
+    p1 = 0
+    if track[0] == '%':
+        p1 = 2
+    p2 = track.index('^', p1)
+    p3 = track.index('^', p2 + 1)
+    p3 += 1
+    p4 = p3 + 4
+    return track[p1:p2], track[p3:p4]
+
+
+

@@ -1,4 +1,5 @@
 .DS_Store
 workspace.xml
 tasks.xml
+misc.xml
 __pycache__/
