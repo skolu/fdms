@@ -13,112 +13,128 @@ US = 31
 SEP = 35
 
 @asyncio.coroutine
-def read_fdms_packet(reader: asyncio.StreamReader) -> bytes:
+def read_packet(reader: asyncio.StreamReader) -> bytes:
     buffer = bytearray()
-    state = 0
+    got_etx = False
     while True:
         ba = yield from reader.read(1)
         b = ba[0]
         if b > 0x7f:
             b &= 0x7f
-        if state == 0:
-            if b == STX:
-                state = 1
-            else:
-                state = 3
-        elif state == 1:
-            if b == ETX:
-                state = 2
-        else:
-            state = 3
         buffer.append(b)
-        if state > 2:
+        if got_etx:
             break
+        else:
+            got_etx = (b == ETX)
 
     return buffer
 
 @asyncio.coroutine
 def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    #Send EQN
+    online = None
+    ''':type: (FdmsHeader, FdmsTransaction)'''
+    offline = []
+
     writer.write(bytes((ENQ,)))
     yield from writer.drain()
 
-
-    online = None
-    offline = []
-    attempt = 0
-
-    # Get Request
     while True:
-        try:
-            if attempt > 4:
-                return
-            request = yield from asyncio.wait_for(read_fdms_packet(reader), timeout=15.0)
-            got_eot = False
-            while len(request) > 0:
-                if request[0] == STX:
-                    try:
-                        if request[-2] == ETX:
-                            lrs = functools.reduce(lambda x, y: x ^ int(y), request[2:-1], int(request[1]))
-                            if lrs != request[-1]:
-                                raise ValueError('LRS sum')
 
-                            pos, header = parse_header(request)
-                            txn = header.create_txn()
-                            txn.parse(request[pos:])
-                            if online is None:
-                                online = (header, txn)
-                            else:
-                                offline.append((header, txn))
-                            # Send ACK
-                            attempt = 0
-                            writer.write(bytes((ACK,)))
-                        else:
-                            raise ValueError('Invalid packet')
-                    except (ValueError, IndexError) as e:
-                        attempt += 1
-                        writer.write(bytes((NAK,)))
+        # Get Request
+        attempt = 0
+        while True:
+            try:
+                if attempt > 4:
+                    return
 
-                    yield from writer.drain()
+                rq_head = yield from asyncio.wait_for(reader.read(1), timeout=15.0)
+                if len(rq_head) == 0:
+                    return
+                control_byte = rq_head[0] & 0x7f
+                if control_byte == STX:
+                    request = yield from asyncio.wait_for(read_packet(reader), timeout=15.0)
+                    lrs = functools.reduce(lambda x, y: x ^ int(y), request[1:-1], int(request[0]))
+                    if lrs != request[-1]:
+                        raise ValueError('LRS sum')
+
+                    pos, header = parse_header(request)
+                    txn = header.create_txn()
+                    txn.parse(request[pos:])
+                    if header.txn_type == '0':
+                        if online is not None:
+                            return
+                        online = (header, txn)
+                    else:
+                        offline.append((header, txn))
+
+                    # Respond with ACK
+                    attempt = 0
+                    writer.write(bytes((ACK,)))
+
+                elif control_byte == EOT:
                     break
-                elif request[0] == EOT:
-                    got_eot = True
-                    break
-                else:
-                    request = request[1:]
 
-            if got_eot:
-                break
+            # Respond with NAK
+            except (ValueError, IndexError) as e:
+                attempt += 1
+                writer.write(bytes((NAK,)))
 
-        except asyncio.TimeoutError as e:
             # Close session
+            except asyncio.TimeoutError as e:
+                return
+
+            yield from writer.drain()
+
+        if online is None:
             return
 
-    # Process Transactions & Send Response
-    for txn in offline:
-        rs = process_txn(txn[0], txn[1])
-    rs = process_txn(online[0], online[1])
+        # Process Transactions & Send Response
+        for txn in offline:
+            rs = process_txn(txn[0], txn[1])
+        offline.clear()
 
-    rs_bytes = rs.response()
-    attempt = 0
-    while True:
-        writer.write(rs_bytes)
-        yield from writer.drain()
+        rs = process_txn(online[0], online[1])
 
-        request = yield from asyncio.wait_for(read_fdms_packet(reader), timeout=4.0)
-        if request[0] == ACK:
-            break
-        elif request[0] == NAK:
-            attempt += 1
+        # Send Response
+        rs_bytes = rs.response()
+        attempt = 0
+        while True:
+            if attempt >= 4:
+                return
+
+            writer.write(rs_bytes)
+            yield from writer.drain()
+
+            control_byte = 0
+            try:
+                while True:
+                    rs_head = yield from asyncio.wait_for(reader.read(1), timeout=4.0)
+                    if len(rs_head) == 0:
+                        return
+                    control_byte = rs_head[0] & 0x7f
+                    if control_byte == ACK:
+                        break
+                    elif control_byte == NAK:
+                        break
+            # Close session
+            except asyncio.TimeoutError as e:
+                return
+
+            if control_byte == ACK:
+                break
+            else:
+                attempt += 1
+
+        if online[0].wcc in {'B', 'C'}:
+            # Send ENQ
+            writer.write(bytes((ENQ,)))
+            yield from writer.drain()
+            continue
         else:
-            return
-        if attempt >= 4:
-            return
+            break
 
-        # Sent EOT
     writer.write(bytes((EOT,)))
     yield from writer.drain()
-
     if writer.can_write_eof():
         writer.write_eof()
 
@@ -186,21 +202,31 @@ def deposit_inquiry_parse(self: DepositInquiryTransaction, data: bytes):
 DepositInquiryTransaction.parse = deposit_inquiry_parse
 
 
+def batch_close_parse(self: BatchCloseTransaction, data: bytes):
+    fs_pos = list(sep_gen(FS, data, 0))
+    if fs_pos[0] > 0:
+        self.credit_batch_amount = float(data[0:fs_pos[0]].decode())
+    if fs_pos[1] - fs_pos[0] == 3:
+        self.offline_items = int(data[fs_pos[0]+1:fs_pos[1]].decode())
+    if fs_pos[2] - fs_pos[1] == 3:
+        self.debit_batch_count = int(data[fs_pos[1]+1:fs_pos[2]].decode())
+    if fs_pos[3] - fs_pos[2] > 0:
+        self.debit_batch_amount = float(data[fs_pos[1]+1:fs_pos[2]].decode())
+
+    self.batch_no = data[fs_pos[2]+1:fs_pos[2]+2].decode()
+    self.item_no = int(data[fs_pos[2]+2:fs_pos[2]+5].decode())
+
+BatchCloseTransaction.parse = batch_close_parse
+
+
 def response(self: FdmsResponse) -> bytes:
     ba = bytearray()
     ba.append(STX)
-    ba.append(self.action_code.encode()[0])
+    ba.append(self.action_code.value.encode()[0])
     ba.append(self.response_code.encode()[0])
     ba.append(self.batch_number.encode()[0])
     ba.extend(self.item_number.encode()[0:4])
     ba.append('0'.encode()[0])
-    ba.append(FS)
-    if len(self.response_text) < 16:
-        self.response_text = self.response_text.ljust(16, ' ')
-    if len(self.response_text) > 16:
-        self.response_text = self.response_text[0:16]
-    ba.extend(self.response_text.encode())
-    ba.append(FS)
     ba.extend(self.body())
     ba.append(ETX)
     ba.append(functools.reduce(lambda x, y: x ^ y, ba[2:], ba[1]))
@@ -209,8 +235,24 @@ def response(self: FdmsResponse) -> bytes:
 FdmsResponse.response = response
 
 
+def text_response_body(self: FdmsTextResponse) -> bytes:
+    if len(self.response_text) < 16:
+        self.response_text = self.response_text.ljust(16, ' ')
+    if len(self.response_text) > 16:
+        self.response_text = self.response_text[0:16]
+
+    ba = bytes([FS])
+    ba += self.response_text.encode()
+    return ba
+
+FdmsTextResponse.body = text_response_body
+
+
 def deposit_response_body(self: DepositInquiryResponse) -> bytes:
-    return self.batch_id_number.encode()
+    ba = FdmsTextResponse.body(self)
+    ba += bytes([FS])
+    ba += self.batch_id_number.encode()
+    return ba
 
 DepositInquiryResponse.body = deposit_response_body
 
@@ -239,11 +281,6 @@ CreditResponse.body = credit_response_body
 
 def parse_header(data: bytes) -> (int, FdmsHeader):
     pos = 0
-    p_b = data[0]
-    if p_b != STX:
-        raise ValueError('<STX> expected')
-
-    pos += 1
     p_ch = data[pos:pos+1].decode()
     if p_ch != '*':
         raise ValueError('Protocol flag * expected')

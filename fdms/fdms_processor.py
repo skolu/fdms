@@ -2,6 +2,7 @@ from enum import Enum
 from .fdms_model import *
 from .fdms_storage import SqlFdmsStorage
 
+
 class FdmsTxnCode(Enum):
     Close = '0'
     Sale = '1'
@@ -20,6 +21,12 @@ MONETARY_TRANSACTIONS = {FdmsTxnCode.Sale, FdmsTxnCode.Return, FdmsTxnCode.Ticke
 
 TRANSACTION_VOID = {FdmsTxnCode.VoidSale, FdmsTxnCode.VoidReturn, FdmsTxnCode.VoidTicketOnly}
 
+class FdmsActionCode(Enum):
+    RegularResponse = '0'
+    HostResponse = '1'
+    RevisionInquiry = '2'
+    PartialApproval = '3'
+
 class FdmsTransaction:
     def __init__(self):
         pass
@@ -30,12 +37,11 @@ class FdmsTransaction:
 
 class FdmsResponse:
     def __init__(self):
-        self.action_code = '0'
+        self.action_code = FdmsActionCode.RegularResponse
         self.response_code = '0'
         self.batch_number = '0'
         self.item_number = '000'
         self.revision_number = '0'
-        self.response_text = ''
 
     def body(self) -> bytes:
         raise NotImplementedError('%s.body' % self.__class__.__name__)
@@ -67,7 +73,6 @@ class FdmsResponse:
         if len(n) != 1:
             raise ValueError('Revision: %d' % number)
         self.revision_number = n
-
 
 class FdmsHeader:
     def __init__(self):
@@ -123,13 +128,32 @@ class KeyedMonetaryTransaction(MonetaryTransaction):
         self.exp_date = ''
 
 
-class DepositInquiryResponse(FdmsResponse):
+class BatchCloseTransaction(FdmsTransaction):
+    def __init__(self):
+        super().__init__()
+        self.batch_no = ''
+        self.item_no = 0
+        self.credit_batch_count = 0
+        self.debit_batch_count = 0
+        self.credit_batch_amount = 0.0
+        self.debit_batch_amount = 0.0
+        self.offline_items = 0
+        self.batched = False
+
+
+class FdmsTextResponse(FdmsResponse):
+    def __init__(self):
+        super().__init__()
+        self.response_text = ''
+
+
+class DepositInquiryResponse(FdmsTextResponse):
     def __init__(self):
         super().__init__()
         self.batch_id_number = ''
 
 
-class CreditResponse(FdmsResponse):
+class CreditResponse(FdmsTextResponse):
     def __init__(self):
         super().__init__()
         self.avc_rs_code = ''
@@ -143,8 +167,9 @@ INV_TRAN_CODE = 'INV TRAN CODE'
 INV_AUTH_CODE = 'INV AUTH CODE'
 UNMATCHED_VOID = 'UNMATCHED VOID'
 
+
 def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
-    response = FdmsResponse()
+    response = FdmsTextResponse()
     try:
         if isinstance(txn, DepositInquiryTransaction):
             response = DepositInquiryResponse()
