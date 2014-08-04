@@ -105,7 +105,13 @@ class MonetaryTransaction(FdmsTransaction):
         self.batch_no = ''
         self.item_no = ''
         self.revision_no = ''
+        self.format_code = ''
+        self.transaction_id = ''
+        self.card_type = ''
+        self.pin_block = ''
+        self.smid_block = ''
         self.authorization_code = ''
+        self.partial_indicator = ''
 
 
 class SwipedMonetaryTransaction(MonetaryTransaction):
@@ -193,7 +199,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
             card_no, card_exp = extract_track2(body.track_data)
             return card_info_md5(card_no, card_exp)
 
-    def authorize(storage: Storage, capture: bool) -> Authorization:
+    def authorize(capture: bool) -> Authorization:
         auth = Authorization()
         auth.is_captured = capture
         auth.merchant_number = header.merchant_number
@@ -227,9 +233,17 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
         if body.revision_no != '0':
             raise ValueError(INV_BATCH_SEQ)
 
+    if body.card_type == 'D':
+        if body.revision_no != '0':
+            raise ValueError(INV_BATCH_SEQ)
+        if txn_code != FdmsTxnCode.Sale:
+            raise ValueError(INV_TRAN_CODE)
+        if not isinstance(body, SwipedMonetaryTransaction):
+            raise ValueError(INV_TRAN_CODE)
+
     with Storage() as storage:
         if txn_code == FdmsTxnCode.AuthOnly:
-            authorization = authorize(storage, False)
+            authorization = authorize(False)
             response.response_text = 'APPROVED %s' % authorization.authorization_code
         else:
             batch = storage.get_open_batch(header.merchant_number, header.device_id)
@@ -241,7 +255,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
 
                 batch = storage.create_batch(header.merchant_number, header.device_id, body.batch_no)
             else:
-                if batch.batch_number != body.batch_no:
+                if batch.batch_no != body.batch_no:
                     raise ValueError(INV_BATCH_SEQ)
 
             record = storage.get_batch_record(batch.id, body.item_no)
@@ -249,7 +263,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                 if body.revision_no != '0':
                     raise ValueError(INV_BATCH_SEQ)
             else:
-                if int(body.revision_no) - int(record.revision_number) != 1:
+                if int(body.revision_no) - int(record.revision_no) != 1:
                     raise ValueError(INV_BATCH_SEQ)
 
             if txn_code in TRANSACTION_VOID:
@@ -262,7 +276,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                     raise ValueError(UNMATCHED_VOID)
 
                 record.txn_code = header.txn_code
-                record.revision_number = body.revision_no
+                record.revision_no = body.revision_no
                 storage.put_batch_record(record)
             elif txn_code in {FdmsTxnCode.Sale, FdmsTxnCode.Return}:
                 if header.txn_code != record.txn_code:
@@ -271,13 +285,14 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                 ''':type: Authorization'''
 
                 if record is None:
-                    authorization = authorize(storage, True)
+                    authorization = authorize(True)
                     record = BatchRecord()
                     record.batch_id = batch.id
                     record.auth_id = authorization.id
                     record.item_no = body.item_no
                     record.txn_code = header.txn_code
                     record.is_credit = authorization.is_credit
+                    record.amount = body.total_amount
                     storage.put_batch_record(record)
                     response.response_text = '%s %s' % ('AUTH/TKT' if txn_code == FdmsTxnCode.Sale else 'RETURN',
                                                         authorization.authorization_code)
@@ -317,6 +332,9 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                 record.item_no = body.item_no
                 record.txn_code = header.txn_code
                 record.is_credit = authorization.is_credit
+                record.revision_no = body.revision_no
+                record.amount = body.total_amount
+                storage.put_authorization(authorization)
                 storage.put_batch_record(record)
                 response.response_text = '%s %s' % ('TKT CODE', authorization.authorization_code)
             else:

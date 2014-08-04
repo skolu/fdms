@@ -18,16 +18,16 @@ class Authorization:
 
 
 class OpenBatch:
-    def __init__(self, merchant_number='', device_id='', batch_number=''):
+    def __init__(self, merchant_number='', device_id='', batch_no=''):
         self.id = None
         self.merchant_number = merchant_number
         self.device_id = device_id
-        self.batch_number = batch_number
+        self.batch_no = batch_no
         self.date_open = datetime.datetime.now()
 
     def __repr__(self):
-        return "<%s(merchant_number='%s', device_id='%s', batch_number='%s' open='%s')>" % \
-               (self.__class__.__name__, self.merchant_number, self.device_id, self.batch_number, self.date_open)
+        return "<%s(merchant_number='%s', device_id='%s', batch_no='%s' date_open='%s')>" % \
+               (self.__class__.__name__, self.merchant_number, self.device_id, self.batch_no, self.date_open)
 
 
 class ClosedBatch(OpenBatch):
@@ -43,13 +43,13 @@ class ClosedBatch(OpenBatch):
         self.id = batch.id
         self.merchant_number = batch.merchant_number
         self.device_id = batch.device_id
-        self.batch_number = batch.batch_number
+        self.batch_no = batch.batch_no
         self.date_open = batch.date_open
 
     def __repr__(self):
-        return "<%s(merchant_number='%s', device_id='%s', batch_number='%s' " \
+        return "<%s(merchant_number='%s', device_id='%s', batch_no='%s' " \
                "open='%s', closed='%s', count='%d/%d', amount='%.2f/%.2f')>" % \
-               (self.__class__.__name__, self.merchant_number, self.device_id, self.batch_number, self.date_open,
+               (self.__class__.__name__, self.merchant_number, self.device_id, self.batch_no, self.date_open,
                 self.date_closed, self.credit_count, self.debit_count, self.credit_amount, self.debit_amount)
 
 

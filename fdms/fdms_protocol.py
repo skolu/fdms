@@ -146,11 +146,38 @@ def monetary_parse(self: MonetaryTransaction, data: bytes):
     self.item_no = data[fs_pos[1]+2:fs_pos[1]+5].decode()
     self.revision_no = data[fs_pos[1]+5:fs_pos[2]].decode()
 
+    pos = fs_pos[2]+1
+    fs_pos = list(sep_gen(FS, data, pos))
+    self.format_code = data[pos:fs_pos[0]].decode()
+    aux_data = None
+    if self.format_code == '6': #Retail
+        if len(fs_pos) < 15:
+            raise ValueError('Monetary: Retail: parse')
+        self.transaction_id = data[fs_pos[11]+1:fs_pos[12]].decode()
+        aux_data = data[fs_pos[14]+1:fs_pos[15]]
+    elif self.format_code == '2': #Restaurant
+        self.transaction_id = data[fs_pos[4]+1:fs_pos[5]].decode()
+        aux_data = data[fs_pos[6]+1:fs_pos[7]]
+    elif self.format_code == '4': #Hotel
+        self.transaction_id = data[fs_pos[7]+1:fs_pos[8]].decode()
+        aux_data = data[fs_pos[12]+1:fs_pos[13]]
+
+    if aux_data is not None:
+        us_pos = list(sep_gen(US, aux_data))
+        if len(us_pos) < 7:
+            raise ValueError('Monetary: parse')
+        self.pin_block = aux_data[0:us_pos[0]].decode()
+        self.card_type = aux_data[us_pos[0]+1:us_pos[1]].decode()
+        self.authorization_code = aux_data[us_pos[4]+1:us_pos[5]].decode()
+        self.smid_block = aux_data[us_pos[5]+1:us_pos[6]].decode()
+        if len(us_pos) > 7:
+            self.partial_indicator = aux_data[us_pos[6]+1:us_pos[7]].decode()
+
 MonetaryTransaction.parse = monetary_parse
 
 
 def swiped_parse(self: SwipedMonetaryTransaction, data: bytes):
-    fs_pos = data.index(FS, 0, 0+77)
+    fs_pos = data.index(FS, 0, 77)
     self.track_data = data[0:fs_pos].decode()
 
     MonetaryTransaction.parse(self, data[fs_pos + 1:])

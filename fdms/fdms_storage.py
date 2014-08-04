@@ -42,7 +42,7 @@ mapper(OpenBatch, open_batch_table, properties={
     'id': open_batch_table.columns.Id,
     'merchant_number': open_batch_table.columns.MerchantNumber,
     'device_id': open_batch_table.columns.DeviceId,
-    'batch_number': open_batch_table.columns.BatchNumber,
+    'batch_no': open_batch_table.columns.BatchNumber,
     'date_open': open_batch_table.columns.DateOpen
 })
 
@@ -64,7 +64,7 @@ mapper(ClosedBatch, closed_batch_table, properties={
     'id': closed_batch_table.columns.Id,
     'merchant_number': closed_batch_table.columns.MerchantNumber,
     'device_id': closed_batch_table.columns.DeviceId,
-    'batch_number': closed_batch_table.columns.BatchNumber,
+    'batch_no': closed_batch_table.columns.BatchNumber,
     'date_open': closed_batch_table.columns.DateOpen,
     'date_closed': closed_batch_table.columns.DateClosed,
     'credit_count': closed_batch_table.columns.CreditCount,
@@ -139,7 +139,7 @@ class SqlFdmsStorage(FdmsStorage):
         self.session.flush()
         return batch
 
-    def get_batch_record(self, batch_id, item_no):
+    def get_batch_record(self, batch_id, item_no) -> BatchRecord:
         query = self.session.query(BatchRecord). \
             filter(BatchRecord.batch_id == batch_id, BatchRecord.item_no == item_no)
         return query.first()
