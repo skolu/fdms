@@ -39,9 +39,9 @@ class FdmsResponse:
     def __init__(self):
         self.action_code = FdmsActionCode.RegularResponse
         self.response_code = '0'
-        self.batch_number = '0'
-        self.item_number = '000'
-        self.revision_number = '0'
+        self.batch_no = '0'
+        self.item_no = '000'
+        self.revision_no = '0'
 
     def body(self) -> bytes:
         raise NotImplementedError('%s.body' % self.__class__.__name__)
@@ -59,20 +59,20 @@ class FdmsResponse:
         n = '%.3d' % number
         if len(n) != 3:
             raise ValueError('Item Number: %d' % number)
-        self.item_number = n
+        self.item_no = n
 
     def set_batch_number(self, number: int):
         n = str(number)
         if len(n) != 1:
             raise ValueError('Batch number: %d' % number)
 
-        self.batch_number = n
+        self.batch_no = n
 
     def set_revision(self, number: int):
         n = str(number)
         if len(n) != 1:
             raise ValueError('Revision: %d' % number)
-        self.revision_number = n
+        self.revision_no = n
 
 class FdmsHeader:
     def __init__(self):
@@ -138,13 +138,11 @@ class BatchCloseTransaction(FdmsTransaction):
     def __init__(self):
         super().__init__()
         self.batch_no = ''
-        self.item_no = 0
-        self.credit_batch_count = 0
-        self.debit_batch_count = 0
+        self.item_no = '000'
         self.credit_batch_amount = 0.0
+        self.debit_batch_count = 0
         self.debit_batch_amount = 0.0
         self.offline_items = 0
-        self.batched = False
 
 
 class FdmsTextResponse(FdmsResponse):
@@ -153,10 +151,11 @@ class FdmsTextResponse(FdmsResponse):
         self.response_text = ''
 
 
-class DepositInquiryResponse(FdmsTextResponse):
+class BatchResponse(FdmsTextResponse):
     def __init__(self):
         super().__init__()
         self.batch_id_number = ''
+        self.response_text2 = ''
 
 
 class CreditResponse(FdmsTextResponse):
@@ -166,25 +165,30 @@ class CreditResponse(FdmsTextResponse):
         self.cvv_rs_code = ''
         self.transaction_id = ''
 
+
 Storage = SqlFdmsStorage
 
 INV_BATCH_SEQ = 'INV BATCH SEQ'
+INVLD_BATCH_SEQ = 'INVLD BATCH SEQ'
 INV_TRAN_CODE = 'INV TRAN CODE'
 INV_AUTH_CODE = 'INV AUTH CODE'
 UNMATCHED_VOID = 'UNMATCHED VOID'
-
+INVALID_PIN = 'INVALID PIN'
 
 def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
     response = FdmsTextResponse()
     try:
         if isinstance(txn, DepositInquiryTransaction):
-            response = DepositInquiryResponse()
+            response = BatchResponse()
             process_deposit_inquiry(header, txn, response)
         elif isinstance(txn, MonetaryTransaction):
             response = CreditResponse()
-            response.batch_number = txn.batch_no
-            response.revision_number = txn.revision_no
+            response.item_no = txn.item_no
+            response.batch_no = txn.batch_no
+            response.revision_no = txn.revision_no
             process_monetary_transaction(header, txn, response)
+        elif isinstance(txn, BatchCloseTransaction):
+            return process_batch_close(header, txn)
         else:
             response.set_negative()
             response.response_text = INV_TRAN_CODE
@@ -196,8 +200,20 @@ def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
         response.response_text = 'ERROR %s' % e
     return response
 
+def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> FdmsResponse:
+    with Storage() as storage:
+        batch = storage.get_open_batch(header.merchant_number, header.device_id)
+        if batch is None:
+            response = BatchResponse()
+            response.set_negative()
+            response.response_text = INVLD_BATCH_SEQ
+            return response
 
-def process_deposit_inquiry(header: FdmsHeader, body: DepositInquiryTransaction, response: DepositInquiryResponse):
+
+
+
+
+def process_deposit_inquiry(header: FdmsHeader, body: DepositInquiryTransaction, response: BatchResponse):
     with Storage() as storage:
         last_batch = storage.last_closed_batch(header.merchant_number, header.device_id)
         if last_batch is None:
@@ -205,12 +221,12 @@ def process_deposit_inquiry(header: FdmsHeader, body: DepositInquiryTransaction,
             last_batch.id = 0
             last_batch.merchant_number = header.merchant_number
             last_batch.device_id = header.device_id
-            last_batch.batch_number = '0'
+            last_batch.batch_no = '0'
 
         response.set_positive()
         response.set_revision(0)
         response.set_item_number(last_batch.credit_count + last_batch.debit_count)
-        response.set_batch_number(last_batch.batch_number)
+        response.set_batch_number(last_batch.batch_no)
         response.response_text = 'DEP %8.2f' % (last_batch.credit_amount + last_batch.debit_amount,)
         response.batch_id_number = '%d' % last_batch.id
 
@@ -221,7 +237,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
         if isinstance(body, KeyedMonetaryTransaction):
             return card_info_md5(body.account_no, body.exp_date)
         elif isinstance(body, SwipedMonetaryTransaction):
-            card_no, card_exp = extract_track2(body.track_data)
+            card_no, card_exp = extract_card_info(body.track_data)
             return card_info_md5(card_no, card_exp)
 
     def authorize(capture: bool) -> Authorization:
@@ -229,7 +245,15 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
         auth.is_captured = capture
         auth.merchant_number = header.merchant_number
         auth.card_hash = calc_card_hash()
-        auth.is_credit = True
+        if body.card_type == 'D':
+            auth.is_credit = False
+            auth.is_captured = True
+            if body.pin_block is None or body.smid_block is None:
+                raise ValueError(INVALID_PIN)
+            if len(body.pin_block) == 0 or len(body.smid_block) == 0:
+                raise ValueError(INVALID_PIN)
+        else:
+            auth.is_credit = True
         auth.amount = body.total_amount
         storage.put_authorization(auth)
         auth.authorization_code = str(auth.id).rjust(6, '0')
@@ -275,7 +299,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
             if batch is None:
                 last_batch = storage.last_closed_batch(header.merchant_number, header.device_id)
                 if last_batch is not None:
-                    if last_batch.batch_number == body.batch_no:
+                    if last_batch.batch_no == body.batch_no:
                         raise ValueError(INV_BATCH_SEQ)
 
                 batch = storage.create_batch(header.merchant_number, header.device_id, body.batch_no)
@@ -303,9 +327,9 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                 record.txn_code = header.txn_code
                 record.revision_no = body.revision_no
                 storage.put_batch_record(record)
+                response.response_text = ''
+
             elif txn_code in {FdmsTxnCode.Sale, FdmsTxnCode.Return}:
-                if header.txn_code != record.txn_code:
-                    raise ValueError(INV_TRAN_CODE)
                 authorization = None
                 ''':type: Authorization'''
 
@@ -319,9 +343,12 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                     record.is_credit = authorization.is_credit
                     record.amount = body.total_amount
                     storage.put_batch_record(record)
+                    response.transaction_id = str(record.id).zfill(10)
                     response.response_text = '%s %s' % ('AUTH/TKT' if txn_code == FdmsTxnCode.Sale else 'RETURN',
                                                         authorization.authorization_code)
                 else:
+                    if header.txn_code != record.txn_code:
+                        raise ValueError(INV_TRAN_CODE)
                     if len(body.authorization_code) == 0:
                         raise ValueError(INV_AUTH_CODE)
                     authorization = storage.get_authorization(record.auth_id)
@@ -331,6 +358,7 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                         raise ValueError(INV_AUTH_CODE)
                     if authorization.authorization_code != body.authorization_code:
                         raise ValueError(INV_AUTH_CODE)
+                    response.response_text = ''
 
                 record.revision_no = body.revision_no
                 record.amount = body.total_amount

@@ -251,8 +251,8 @@ def response(self: FdmsResponse) -> bytes:
     ba.append(STX)
     ba.append(self.action_code.value.encode()[0])
     ba.append(self.response_code.encode()[0])
-    ba.append(self.batch_number.encode()[0])
-    ba.extend(self.item_number.encode()[0:4])
+    ba.append(self.batch_no.encode()[0])
+    ba.extend(self.item_no.encode()[0:4])
     ba.append('0'.encode()[0])
     ba.extend(self.body())
     ba.append(ETX)
@@ -275,13 +275,22 @@ def text_response_body(self: FdmsTextResponse) -> bytes:
 FdmsTextResponse.body = text_response_body
 
 
-def deposit_response_body(self: DepositInquiryResponse) -> bytes:
+def deposit_response_body(self: BatchResponse) -> bytes:
     ba = FdmsTextResponse.body(self)
     ba += bytes([FS])
     ba += self.batch_id_number.encode()
+    if self.response_text2 is not None:
+        if len(self.response_text2) > 0:
+            if len(self.response_text2) < 16:
+                self.response_text2 = self.response_text2.ljust(16, ' ')
+            if len(self.response_text2) > 16:
+                self.response_text2 = self.response_text2[0:16]
+        ba = bytes([FS])
+        ba += self.response_text2.encode()
+
     return ba
 
-DepositInquiryResponse.body = deposit_response_body
+BatchResponse.body = deposit_response_body
 
 
 def credit_response_body(self: CreditResponse) -> bytes:

@@ -108,6 +108,14 @@ def card_info_md5(card_number: str, card_expiration: str):
     h.update(card_expiration.encode())
     return h.hexdigest().upper()
 
+def extract_card_info(track: str) -> (str, str):
+    if track is None:
+        raise ValueError('Invalid track')
+    if track[0] == '%':
+        return extract_track1(track)
+    elif track[0] == ';':
+        return extract_track2(track)
+    raise ValueError('Invalid track')
 
 def extract_track2(track: str) -> (str, str):
     p1 = 0
