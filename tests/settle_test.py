@@ -18,7 +18,6 @@ class SettleTest(FdmsTestCase):
         body.debit_batch_count = 1
 
 
-
 def suite():
     test_suite = unittest.TestSuite()
     test_suite.addTest(unittest.makeSuite(AuthorizeTest))

@@ -1,6 +1,8 @@
 import asyncio
 import functools
+import logging
 from .fdms_processor import *
+from . import LOG_NAME
 
 STX = 2
 ETX = 3
@@ -13,19 +15,27 @@ US = 31
 SEP = 35
 
 @asyncio.coroutine
-def read_packet(reader: asyncio.StreamReader) -> bytes:
+def read_fdms_packet(reader: asyncio.StreamReader) -> bytes:
     buffer = bytearray()
-    got_etx = False
-    while True:
-        ba = yield from reader.read(1)
-        b = ba[0]
-        if b > 0x7f:
-            b &= 0x7f
-        buffer.append(b)
-        if got_etx:
-            break
-        else:
-            got_etx = (b == ETX)
+    ba = yield from reader.read(1)
+    b = ba[0]
+    if b > 0x7f:
+        b &= 0x7f
+
+    buffer.append(b)
+
+    if b == STX:
+        got_etx = False
+        while True:
+            ba = yield from reader.read(1)
+            b = ba[0]
+            if b > 0x7f:
+                b &= 0x7f
+            buffer.append(b)
+            if got_etx:
+                break
+            else:
+                got_etx = (b == ETX)
 
     return buffer
 
@@ -47,13 +57,13 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                 if attempt > 4:
                     return
 
-                rq_head = yield from asyncio.wait_for(reader.read(1), timeout=15.0)
-                if len(rq_head) == 0:
+                request = yield from asyncio.wait_for(read_fdms_packet(reader), timeout=15.0)
+                if len(request) == 0:
                     return
-                control_byte = rq_head[0] & 0x7f
+
+                control_byte = request[0]
                 if control_byte == STX:
-                    request = yield from asyncio.wait_for(read_packet(reader), timeout=15.0)
-                    lrs = functools.reduce(lambda x, y: x ^ int(y), request[1:-1], int(request[0]))
+                    lrs = functools.reduce(lambda x, y: x ^ int(y), request[2:-1], int(request[1]))
                     if lrs != request[-1]:
                         raise ValueError('LRS sum')
 
@@ -74,14 +84,16 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                 elif control_byte == EOT:
                     break
 
-            # Respond with NAK
-            except (ValueError, IndexError) as e:
-                attempt += 1
-                writer.write(bytes((NAK,)))
-
             # Close session
             except asyncio.TimeoutError as e:
                 return
+
+            # Respond with NAK
+            except Exception as e:
+                logging.getLogger(LOG_NAME).debug('Request error: %s', e)
+                attempt += 1
+                writer.write(bytes((NAK,)))
+
 
             yield from writer.drain()
 
@@ -139,21 +151,21 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         writer.write_eof()
 
 
-def sep_gen(sep, buffer, offset, count = -1):
+def sep_gen(sep, buffer, offset = 0, count = -1):
     for i in range(offset, len(buffer)):
         if count == 0:
             break
         if buffer[i] == sep:
             yield i
-        if count > 0:
-            count -= 1
+            if count > 0:
+                count -= 1
 
 
 def monetary_parse(self: MonetaryTransaction, data: bytes):
     fs_pos = list(sep_gen(FS, data, 0, 3))
     if len(fs_pos) != 3:
         raise ValueError('Monetary: parse')
-    if fs_pos[2] - fs_pos[1] != 5:
+    if fs_pos[2] - (fs_pos[1] + 1) != 5:
         raise ValueError('Monetary: parse')
 
     self.total_amount = float(data[0:fs_pos[0]].decode())
@@ -165,7 +177,7 @@ def monetary_parse(self: MonetaryTransaction, data: bytes):
     pos = fs_pos[2]+1
     fs_pos = list(sep_gen(FS, data, pos))
     self.format_code = data[pos:fs_pos[0]].decode()
-    aux_data = None
+    aux_data = bytes()
     if self.format_code == '6': #Retail
         if len(fs_pos) < 15:
             raise ValueError('Monetary: Retail: parse')
@@ -178,7 +190,7 @@ def monetary_parse(self: MonetaryTransaction, data: bytes):
         self.transaction_id = data[fs_pos[7]+1:fs_pos[8]].decode()
         aux_data = data[fs_pos[12]+1:fs_pos[13]]
 
-    if aux_data is not None:
+    if len(aux_data) > 0:
         us_pos = list(sep_gen(US, aux_data))
         if len(us_pos) < 7:
             raise ValueError('Monetary: parse')
@@ -211,14 +223,14 @@ def keyed_parse(self: KeyedMonetaryTransaction, data: bytes):
     s_pos = [i+1 for i in e_pos]
     e_pos.append(len(field1))
     s_pos.insert(0, 0)
-    fields = [field1[s:e] for s, e in zip(s_pos, e_pos)]
+    fields = [field1[s:e].decode() for s, e in zip(s_pos, e_pos)]
     if len(fields) > 2:
         self.cvv = fields[2]
     if len(fields) > 1:
         self.cv_presence = fields[1]
     if len(fields) > 0:
         self.account_no = fields[0]
-    MonetaryTransaction.parse(self, data[fs_pos + 1:])
+    MonetaryTransaction.parse(self, data[fs_pos[1]+1:])
 
 KeyedMonetaryTransaction.parse = keyed_parse
 
@@ -285,8 +297,8 @@ def deposit_response_body(self: BatchResponse) -> bytes:
                 self.response_text2 = self.response_text2.ljust(16, ' ')
             if len(self.response_text2) > 16:
                 self.response_text2 = self.response_text2[0:16]
-        ba = bytes([FS])
-        ba += self.response_text2.encode()
+            ba += bytes([FS])
+            ba += self.response_text2.encode()
 
     return ba
 
@@ -294,29 +306,32 @@ BatchResponse.body = deposit_response_body
 
 
 def credit_response_body(self: CreditResponse) -> bytes:
-    rs = bytearray()
+    ba = FdmsTextResponse.body(self)
     if len(self.avc_rs_code) > 0:
-        rs.append(self.avc_rs_code.encode()[0])
+        ba += self.avc_rs_code.encode()
     else:
-        rs.extend('0'.encode())
+        ba += '0'.encode()
     if len(self.cvv_rs_code) > 0:
-        rs.append(self.cvv_rs_code.encode()[0])
-    rs.append(FS)
-    rs.append(FS)
+        ba += self.cvv_rs_code.encode()
+    ba += bytes([FS])
+    ba += bytes([FS])
     if len(self.transaction_id) > 0:
         tid = self.transaction_id.encode()
         if len(tid) > 15:
             tid = tid[0:15]
-        rs.extend(tid)
-    rs.append(FS)
+        ba += tid
+    ba += bytes([FS])
 
-    return rs
+    return ba
 
 CreditResponse.body = credit_response_body
 
 
 def parse_header(data: bytes) -> (int, FdmsHeader):
     pos = 0
+    if data[pos] == STX:
+        pos += 1
+
     p_ch = data[pos:pos+1].decode()
     if p_ch != '*':
         raise ValueError('Protocol flag * expected')
@@ -351,6 +366,8 @@ def parse_header(data: bytes) -> (int, FdmsHeader):
     if p_sep != FS:
         raise ValueError('Invalid transaction header')
 
+    pos += 1
+
     header = FdmsHeader()
     header.protocol_type = p_type
     header.terminal_id = term_id
@@ -358,7 +375,7 @@ def parse_header(data: bytes) -> (int, FdmsHeader):
     header.device_id = device_id
     header.wcc = wcc
     header.txn_type = txn_type
-    header.txn_code = FdmsTxnCode(txn_code)
+    header.txn_code = txn_code
 
     return pos, header
 

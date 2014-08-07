@@ -2,8 +2,12 @@ import fdms
 import asyncio
 import os
 import ssl
+import logging
 
 UNIX_SOCKET_PATH = 'fdms.1'
+logging.getLogger(fdms.LOG_NAME).setLevel(logging.DEBUG)
+logging.getLogger(fdms.LOG_NAME).addHandler(logging.StreamHandler())
+
 
 loop = asyncio.get_event_loop()
 
@@ -15,7 +19,6 @@ def accept_fdms_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
 def accept_site_net_client(reader, writer):
     task = asyncio.Task(asyncio.open_unix_connection(path=UNIX_SOCKET_PATH))
     asyncio.Task(fdms.site_net_session(reader, writer, task)).add_done_callback(lambda fut: writer.close())
-
 
 
 # Start FDMS

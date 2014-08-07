@@ -113,9 +113,8 @@ def extract_card_info(track: str) -> (str, str):
         raise ValueError('Invalid track')
     if track[0] == '%':
         return extract_track1(track)
-    elif track[0] == ';':
+    else:
         return extract_track2(track)
-    raise ValueError('Invalid track')
 
 def extract_track2(track: str) -> (str, str):
     p1 = 0

@@ -1,7 +1,8 @@
 from enum import Enum
 from .fdms_model import *
 from .fdms_storage import SqlFdmsStorage
-
+from . import LOG_NAME
+import logging
 
 class FdmsTxnCode(Enum):
     Close = '0'
@@ -16,10 +17,11 @@ class FdmsTxnCode(Enum):
     RevisionInquiry = 'I'
     NegativeResponse = 'N'
 
-MONETARY_TRANSACTIONS = {FdmsTxnCode.Sale, FdmsTxnCode.Return, FdmsTxnCode.TicketOnly, FdmsTxnCode.AuthOnly,
-                         FdmsTxnCode.VoidSale, FdmsTxnCode.VoidReturn, FdmsTxnCode.VoidTicketOnly}
+MONETARY_TRANSACTIONS = {FdmsTxnCode.Sale.value, FdmsTxnCode.Return.value, FdmsTxnCode.TicketOnly.value,
+                         FdmsTxnCode.AuthOnly.value, FdmsTxnCode.VoidSale.value, FdmsTxnCode.VoidReturn.value,
+                         FdmsTxnCode.VoidTicketOnly.value}
 
-TRANSACTION_VOID = {FdmsTxnCode.VoidSale, FdmsTxnCode.VoidReturn, FdmsTxnCode.VoidTicketOnly}
+TRANSACTION_VOID = {FdmsTxnCode.VoidSale.value, FdmsTxnCode.VoidReturn.value, FdmsTxnCode.VoidTicketOnly.value}
 
 class FdmsActionCode(Enum):
     RegularResponse = '0'
@@ -82,17 +84,18 @@ class FdmsHeader:
         self.device_id = ''
         self.wcc = ''
         self.txn_type = ''
-        self.txn_code = FdmsTxnCode.Close
+        self.txn_code = FdmsTxnCode.Close.value
 
     def create_txn(self) -> FdmsTransaction:
+
         if self.txn_code in MONETARY_TRANSACTIONS:
             if self.wcc in ['@', 'B']:
                 return KeyedMonetaryTransaction()
             else:
                 return SwipedMonetaryTransaction()
-        elif self.txn_code == FdmsTxnCode.Close:
+        elif self.txn_code == FdmsTxnCode.Close.value:
             raise ValueError('Transaction is not supported')
-        elif self.txn_code == FdmsTxnCode.DepositInquiry:
+        elif self.txn_code == FdmsTxnCode.DepositInquiry.value:
             return DepositInquiryTransaction()
 
         raise ValueError('Transaction is not supported')
@@ -193,11 +196,13 @@ def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
             response.set_negative()
             response.response_text = INV_TRAN_CODE
     except ValueError as ve:
+        logging.getLogger(LOG_NAME).debug('Txn Process Error: ', ve)
         response.set_negative()
         response.response_text = ve
     except Exception as e:
+        logging.getLogger(LOG_NAME).debug('Txn Process Error: ', e)
         response.set_negative()
-        response.response_text = 'ERROR %s' % e
+        response.response_text = 'ERROR'
     return response
 
 def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> FdmsResponse:

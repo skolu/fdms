@@ -1,11 +1,7 @@
 import struct
-import logging
 from .fdms_protocol import *
-
-LOG_NAME = 'SiteNET Server'
-
-logging.getLogger(LOG_NAME).setLevel(logging.DEBUG)
-logging.getLogger(LOG_NAME).addHandler(logging.StreamHandler())
+from . import LOG_NAME
+import logging
 
 @asyncio.coroutine
 def read_site_net_packet(reader: asyncio.StreamReader) -> (str, bytes):
