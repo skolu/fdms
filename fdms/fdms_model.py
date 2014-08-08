@@ -103,7 +103,7 @@ class FdmsStorage:
     def put_authorization(self, authorization: Authorization):
         raise NotImplementedError('%s.put_authorization()' % self.__class__.__name__)
 
-    def close_batch(self, batch: OpenBatch, credit: (int, float), debit: (int, float)=(0, 0.0)) -> ClosedBatch:
+    def close_batch(self, batch: OpenBatch, credit: (int, float), debit: (int, float)) -> ClosedBatch:
         raise NotImplementedError('%s.close_batch()' % self.__class__.__name__)
 
 

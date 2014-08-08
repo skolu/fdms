@@ -14,6 +14,7 @@ FS = 28
 US = 31
 SEP = 35
 
+
 @asyncio.coroutine
 def read_fdms_packet(reader: asyncio.StreamReader) -> bytes:
     buffer = bytearray()
@@ -71,7 +72,7 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
 
                     pos, header = parse_header(request)
                     txn = header.create_txn()
-                    txn.parse(request[pos:])
+                    txn.parse(request[pos:-2])
                     if header.txn_type == FdmsTransactionType.Online.value:
                         if online is None:
                             online = (header, txn)
@@ -88,7 +89,7 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                     break
 
             # Close session
-            except asyncio.TimeoutError as e:
+            except asyncio.TimeoutError:
                 return
 
             # Respond with NAK
@@ -104,14 +105,14 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
 
         # Process Transactions & Send Response
         for txn in offline:
-            rs = process_txn(txn[0], txn[1])
+            rs = process_txn(txn)
         offline.clear()
 
         if add_on is not None:
             process_add_on_txn(online, add_on)
         add_on = None
 
-        rs = process_txn(online[0], online[1])
+        rs = process_txn(online)
 
         # Send Response
         rs_bytes = rs.response()
@@ -201,15 +202,15 @@ def monetary_parse(self: MonetaryTransaction, data: bytes):
     fs_pos = list(sep_gen(FS, data, pos))
     self.format_code = data[pos:fs_pos[0]].decode()
     aux_data = bytes()
-    if self.format_code == '6': #Retail
+    if self.format_code == '6':  # Retail
         if len(fs_pos) < 15:
             raise ValueError('Monetary: Retail: parse')
         self.transaction_id = data[fs_pos[11]+1:fs_pos[12]].decode()
         aux_data = data[fs_pos[14]+1:fs_pos[15]]
-    elif self.format_code == '2': #Restaurant
+    elif self.format_code == '2':  # Restaurant
         self.transaction_id = data[fs_pos[4]+1:fs_pos[5]].decode()
         aux_data = data[fs_pos[6]+1:fs_pos[7]]
-    elif self.format_code == '4': #Hotel
+    elif self.format_code == '4':  # Hotel
         self.transaction_id = data[fs_pos[7]+1:fs_pos[8]].decode()
         aux_data = data[fs_pos[12]+1:fs_pos[13]]
 
@@ -219,9 +220,9 @@ def monetary_parse(self: MonetaryTransaction, data: bytes):
             raise ValueError('Monetary: parse')
         self.pin_block = fields[0]
         self.card_type = fields[1]
-        #cashback - 2
-        #surcharge - 3
-        #voucher number - 4
+        # cashback - 2
+        # surcharge - 3
+        # voucher number - 4
         self.authorization_code = fields[5]
         self.smid_block = fields[6]
         if len(fields) > 7:
@@ -267,34 +268,33 @@ DepositInquiryTransaction.parse = deposit_inquiry_parse
 
 
 def batch_close_parse(self: BatchCloseTransaction, data: bytes):
-    fs_pos = list(sep_gen(FS, data, 0))
-    if fs_pos[0] > 0:
-        self.credit_batch_amount = float(data[0:fs_pos[0]].decode())
-    if fs_pos[1] - fs_pos[0] == 3:
-        self.offline_items = int(data[fs_pos[0]+1:fs_pos[1]].decode())
-    if fs_pos[2] - fs_pos[1] == 3:
-        self.debit_batch_count = int(data[fs_pos[1]+1:fs_pos[2]].decode())
-    if fs_pos[3] - fs_pos[2] > 0:
-        self.debit_batch_amount = float(data[fs_pos[1]+1:fs_pos[2]].decode())
+    fields = list(buf_chop(data, sep_gen(FS, data)))
+    if len(fields) < 5:
+        raise ValueError('Batch Close: parse')
 
-    self.batch_no = data[fs_pos[2]+1:fs_pos[2]+2].decode()
-    self.item_no = int(data[fs_pos[2]+2:fs_pos[2]+5].decode())
+    self.credit_batch_amount = float(fields[0])
+    self.offline_items = int(fields[1])
+    self.debit_batch_count = int(fields[2])
+    self.debit_batch_amount = float(fields[3])
+    self.batch_no = fields[4][0:1]
+    self.item_no = fields[4][1:4]
 
 BatchCloseTransaction.parse = batch_close_parse
 
 
 def revision_inquiry_parse(self: RevisionInquiryTransaction, data: bytes):
-    pos = data.index(FS, 0, 4)
-    self.item_no = data[0: pos].decode()
-
-    aux_data = data[pos+1, -3]
-    revisions = list(buf_chop(aux_data, sep_gen(FS, data)))
+    fields = list(buf_chop(data, sep_gen(FS, data)))
+    self.item_no = fields[0]
+    revisions = fields[1:11]
     if len(revisions) == 10:
         self.revisions = revisions
     else:
-        self.revisions = ['' for i in range(10)]
+        self.revisions = []
+        for i in range(10):
+            self.revisions.append('')
 
 RevisionInquiryTransaction.parse = revision_inquiry_parse
+
 
 def response(self: FdmsResponse) -> bytes:
     ba = bytearray()
@@ -370,6 +370,7 @@ def specific_poll_body(self: SpecificPollResponse) -> bytes:
 
 SpecificPollResponse.body = specific_poll_body
 
+
 def parse_header(data: bytes) -> (int, FdmsHeader):
     pos = 0
     if data[pos] == STX:
@@ -421,5 +422,3 @@ def parse_header(data: bytes) -> (int, FdmsHeader):
     header.txn_code = txn_code
 
     return pos, header
-
-

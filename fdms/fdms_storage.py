@@ -1,6 +1,6 @@
 from sqlalchemy import MetaData, Table, Column, Index, Integer, String, Boolean, DateTime, Float, desc
 from sqlalchemy import create_engine
-from sqlalchemy.orm import mapper, sessionmaker
+from sqlalchemy.orm import mapper, sessionmaker, Session
 
 from .fdms_model import *
 
@@ -103,16 +103,17 @@ engine = create_engine('sqlite:///:memory:', echo=True)
 
 fdms_metadata.create_all(engine)
 
-Session = sessionmaker(bind=engine)
+_SqlSession = sessionmaker(bind=engine)
 
 
 class SqlFdmsStorage(FdmsStorage):
     def __init__(self):
         super().__init__()
         self.session = None
+        ''':type: Session'''
 
     def __enter__(self):
-        self.session = Session()
+        self.session = _SqlSession()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -122,13 +123,13 @@ class SqlFdmsStorage(FdmsStorage):
     def save(self):
         self.session.commit()
 
-    def last_closed_batch(self, merchant_number, device_id):
+    def last_closed_batch(self, merchant_number: str, device_id: str) -> ClosedBatch:
         query = self.session.query(ClosedBatch). \
             filter(ClosedBatch.merchant_number == merchant_number, ClosedBatch.device_id == device_id). \
             order_by(ClosedBatch.date_closed.desc())
         return query.first()
 
-    def get_open_batch(self, merchant_number, device_id):
+    def get_open_batch(self, merchant_number, device_id) -> OpenBatch:
         query = self.session.query(OpenBatch). \
             filter(OpenBatch.merchant_number == merchant_number, OpenBatch.device_id == device_id)
         return query.first()
@@ -148,16 +149,18 @@ class SqlFdmsStorage(FdmsStorage):
         self.session.add(batch_record)
         self.session.flush()
 
-    def get_authorization(self, rec_id):
+    def get_authorization(self, rec_id) -> Authorization:
         return self.session.query(Authorization).get(rec_id)
 
-    def put_authorization(self, authorization):
+    def put_authorization(self, authorization: Authorization):
         self.session.add(authorization)
         self.session.flush()
 
-    def query_authorization(self, merchant_number, authorization_code):
+    def query_authorization(self, merchant_number: str, authorization_code: str) -> list:
+        ''':rtype: list of Authorization'''
         query = self.session.query(Authorization). \
-            filter(Authorization.merchant_number == merchant_number, Authorization.authorization_code == authorization_code)
+            filter(Authorization.merchant_number == merchant_number,
+                   Authorization.authorization_code == authorization_code)
         return query.all()
 
     def query_batch_items(self, batch_id: int) -> list:
@@ -165,8 +168,8 @@ class SqlFdmsStorage(FdmsStorage):
             filter(BatchRecord.batch_id == batch_id)
         return query.all()
 
-    def close_batch(self, batch: OpenBatch, credit: (int, float), debit: (int, float)=(0, 0.0)) -> ClosedBatch:
-        closed_batch = ClosedBatch(batch)
+    def close_batch(self, batch: OpenBatch, credit: (int, float), debit: (int, float)) -> ClosedBatch:
+        closed_batch = ClosedBatch()
         closed_batch.from_batch(batch)
         closed_batch.credit_count = credit[0]
         closed_batch.credit_amount = credit[1]

@@ -5,6 +5,7 @@ from . import LOG_NAME
 import logging
 import math
 
+
 class FdmsTxnCode(Enum):
     Close = '0'
     Sale = '1'
@@ -18,6 +19,7 @@ class FdmsTxnCode(Enum):
     RevisionInquiry = 'I'
     NegativeResponse = 'N'
 
+
 MONETARY_TRANSACTIONS = {FdmsTxnCode.Sale.value, FdmsTxnCode.Return.value, FdmsTxnCode.TicketOnly.value,
                          FdmsTxnCode.AuthOnly.value, FdmsTxnCode.VoidSale.value, FdmsTxnCode.VoidReturn.value,
                          FdmsTxnCode.VoidTicketOnly.value}
@@ -25,7 +27,7 @@ MONETARY_TRANSACTIONS = {FdmsTxnCode.Sale.value, FdmsTxnCode.Return.value, FdmsT
 TRANSACTION_VOID = {FdmsTxnCode.VoidSale.value, FdmsTxnCode.VoidReturn.value, FdmsTxnCode.VoidTicketOnly.value}
 
 
-class FdmsBatchCloseState(Enum):
+class BatchCloseState(Enum):
     ReadyToClose = 1
     HostSpecificPollTransaction = 2
     RevisionInquiry = 3
@@ -97,6 +99,7 @@ class FdmsResponse:
             raise ValueError('Revision: %d' % number)
         self.revision_no = n
 
+
 class FdmsHeader:
     def __init__(self):
         self.protocol_type = ''
@@ -127,13 +130,13 @@ class FdmsHeader:
 class DepositInquiryTransaction(FdmsTransaction):
     pass
 
-
 class RevisionInquiryTransaction(FdmsTransaction):
     def __init__(self):
         super().__init__()
         self.item_no = ''
         self.revisions = list()
         ''':type: list of [str]'''
+
 
 class MonetaryTransaction(FdmsTransaction):
     def __init__(self):
@@ -180,8 +183,13 @@ class BatchCloseTransaction(FdmsTransaction):
         ''':type: dict of [str, BatchRecord]'''
         self.poll_items = set()
         ''':type: set of [str]'''
-        self.last_revision = '001'
-        self.state = FdmsBatchCloseState.ReadyToClose
+        self.last_item_no = '001'
+        self.state = BatchCloseState.ReadyToClose
+
+    def set_last_item_no(self, number):
+        if number >= 1000:
+            number = 999
+        self.last_item_no = '%.3d' % number
 
 
 class FdmsTextResponse(FdmsResponse):
@@ -213,6 +221,7 @@ class SpecificPollResponse(FdmsResponse):
         super().__init__()
         self.request_type = FdmsTransactionType.SpecificPollTransaction.value
 
+
 Storage = SqlFdmsStorage
 
 INV_BATCH_SEQ = 'INV BATCH SEQ'
@@ -226,36 +235,42 @@ CLOSE_UNAVAIL = 'CLOSE UNAVAIL'
 
 def process_add_on_txn(main: (FdmsHeader, FdmsTransaction), add_on: (FdmsHeader, FdmsTransaction)):
     if isinstance(main[1], BatchCloseTransaction) and isinstance(add_on[1], RevisionInquiryTransaction):
-        start_item_no = int(add_on[1].item_no)
-        for i in range(len(add_on[1].revisions)):
+        close_txn = main[1]
+        ''':type: BatchCloseTransaction'''
+        revision_txn = add_on[1]
+        ''':type: RevisionInquiryTransaction'''
+        start_item_no = int(revision_txn.item_no)
+        for i in range(len(revision_txn.revisions)):
             item_no = '%.3d' % (start_item_no + i)
-            revision = add_on[1].revisions[i]
+            revision = revision_txn.revisions[i]
             if len(revision) == 1:
                 if '0' <= revision <= '9':
-                    item = main[1].batch_items[item_no]
+                    item = close_txn.batch_items[item_no]
                     if item is not None:
-                        if item.revision_no != revision:
-                            main[1].poll_items.add(item_no)
+                        if item.revision_no < revision:
+                            close_txn.poll_items.add(item_no)
 
-        main[1].last_revision = '%.3d' % (start_item_no + len(add_on[1].revisions))
+        start_item_no += len(revision_txn.revisions)
+        close_txn.set_last_item_no(start_item_no)
     else:
         raise ValueError(INV_TRAN_CODE)
 
 
-def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
+def process_txn(transaction: (FdmsHeader, FdmsTransaction)) -> FdmsResponse:
+    header, body = transaction
     response = FdmsTextResponse()
     try:
-        if isinstance(txn, DepositInquiryTransaction):
+        if isinstance(body, DepositInquiryTransaction):
             response = BatchResponse()
-            process_deposit_inquiry(header, txn, response)
-        elif isinstance(txn, MonetaryTransaction):
+            process_deposit_inquiry(header, body, response)
+        elif isinstance(body, MonetaryTransaction):
             response = CreditResponse()
-            response.item_no = txn.item_no
-            response.batch_no = txn.batch_no
-            response.revision_no = txn.revision_no
-            process_monetary_transaction(header, txn, response)
-        elif isinstance(txn, BatchCloseTransaction):
-            return process_batch_close(header, txn)
+            response.item_no = body.item_no
+            response.batch_no = body.batch_no
+            response.revision_no = body.revision_no
+            process_monetary_transaction(header, body, response)
+        elif isinstance(body, BatchCloseTransaction):
+            return process_batch_close(header, body)
         else:
             response.set_negative()
             response.response_text = INV_TRAN_CODE
@@ -271,7 +286,6 @@ def process_txn(header: FdmsHeader, txn: FdmsTransaction) -> FdmsResponse:
 
 
 def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> FdmsResponse:
-
     def get_specific_poll_response() -> SpecificPollResponse:
         if len(body.poll_items) == 0:
             return None
@@ -281,27 +295,31 @@ def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> Fdms
         rs.batch_no = body.batch_no
         rs.action_code = FdmsActionCode.HostSpecificPoll
         rs.request_type = FdmsTransactionType.SpecificPollTransaction.value \
-            if body.state == FdmsBatchCloseState.HostSpecificPollTransaction \
+            if body.state == BatchCloseState.HostSpecificPollTransaction \
             else FdmsTransactionType.SpecificPollRevised.value
 
         return rs
 
     def get_revision_inquiry_response() -> FdmsResponse:
-        if body.last_revision >= body.item_no:
+        if body.last_item_no >= body.item_no:
             return None
         rs = FdmsResponse()
         rs.set_positive()
-        rs.item_no = body.last_revision
+        rs.item_no = body.last_item_no
         rs.batch_no = body.batch_no
         rs.action_code = FdmsActionCode.RevisionInquiry
-        body.last_revision = body.item_no
+        body.last_item_no = body.item_no
 
         return rs
 
-    if body.state in {FdmsBatchCloseState.HostSpecificPollTransaction, FdmsBatchCloseState.HostSpecificPollRevision}:
-        rs = get_specific_poll_response()
-        if rs is not None:
-            return rs
+    if body.state in {BatchCloseState.HostSpecificPollTransaction, BatchCloseState.HostSpecificPollRevision}:
+        response = get_specific_poll_response()
+        if response is not None:
+            return response
+    elif body.state == BatchCloseState.RevisionInquiry:
+        response = get_revision_inquiry_response()
+        if response is not None:
+            return response
 
     with Storage() as storage:
         batch = storage.get_open_batch(header.merchant_number, header.device_id)
@@ -339,8 +357,8 @@ def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> Fdms
         max_item_no += 1
         rq_max_item_no = int(body.item_no)
 
-        if body.state == FdmsBatchCloseState.ReadyToClose:
-            body.state = FdmsBatchCloseState.HostSpecificPollTransaction
+        if body.state == BatchCloseState.ReadyToClose:
+            body.state = BatchCloseState.HostSpecificPollTransaction
             body.poll_items.clear()
             for i in range(1, rq_max_item_no):
                 i_no = '%.3d' % i
@@ -352,21 +370,21 @@ def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> Fdms
                 return response
 
         if math.fabs(body.credit_batch_amount - credit_amount) > 0.01:
-            if body.state == FdmsBatchCloseState.HostSpecificPollTransaction:
-                body.state = FdmsBatchCloseState.RevisionInquiry
-                body.last_revision = '001'
+            if body.state == BatchCloseState.HostSpecificPollTransaction:
+                body.state = BatchCloseState.RevisionInquiry
+                body.last_item_no = '001'
 
                 body.poll_items.clear()
                 response = get_revision_inquiry_response()
                 if response is not None:
                     return response
-            elif body.state == FdmsBatchCloseState.RevisionInquiry:
-                body.state = FdmsBatchCloseState.HostSpecificPollRevision
+            elif body.state == BatchCloseState.RevisionInquiry:
+                body.state = BatchCloseState.HostSpecificPollRevision
                 response = get_specific_poll_response()
                 if response is not None:
                     return response
 
-        body.state = FdmsBatchCloseState.Closed
+        body.state = BatchCloseState.Closed
         storage.close_batch(batch, (credit_count, credit_amount), (debit_count, debit_amount))
         storage.save()
 
@@ -381,12 +399,13 @@ def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> Fdms
             ok = debit_amount == body.debit_batch_count and math.fabs(body.debit_batch_amount - debit_amount) < 0.01
             response.response_text2 = '%s %8.2f' % ('CLOSE' if ok else 'FORCE', debit_amount)
 
-        body.state = FdmsBatchCloseState.Closed
+        body.state = BatchCloseState.Closed
         return response
 
     raise ValueError(CLOSE_UNAVAIL)
 
 
+# noinspection PyUnusedLocal
 def process_deposit_inquiry(header: FdmsHeader, body: DepositInquiryTransaction, response: BatchResponse):
     with Storage() as storage:
         last_batch = storage.last_closed_batch(header.merchant_number, header.device_id)
@@ -406,7 +425,6 @@ def process_deposit_inquiry(header: FdmsHeader, body: DepositInquiryTransaction,
 
 
 def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, response: CreditResponse):
-
     def calc_card_hash() -> str:
         if isinstance(body, KeyedMonetaryTransaction):
             return card_info_md5(body.account_no, body.exp_date)
@@ -494,8 +512,8 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                     raise ValueError(UNMATCHED_VOID)
                 cur_code = FdmsTxnCode(record.txn_code)
                 if not ((txn_code == FdmsTxnCode.VoidSale and cur_code == FdmsTxnCode.Sale) or
-                            (txn_code == FdmsTxnCode.VoidReturn and cur_code == FdmsTxnCode.Return) or
-                            (txn_code == FdmsTxnCode.VoidTicketOnly and cur_code == FdmsTxnCode.TicketOnly)):
+                        (txn_code == FdmsTxnCode.VoidReturn and cur_code == FdmsTxnCode.Return) or
+                        (txn_code == FdmsTxnCode.VoidTicketOnly and cur_code == FdmsTxnCode.TicketOnly)):
                     raise ValueError(UNMATCHED_VOID)
 
                 record.txn_code = header.txn_code
@@ -504,9 +522,6 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                 response.response_text = ''
 
             elif txn_code in {FdmsTxnCode.Sale, FdmsTxnCode.Return}:
-                authorization = None
-                ''':type: Authorization'''
-
                 if record is None:
                     authorization = authorize(True)
                     record = BatchRecord()
@@ -545,9 +560,9 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                     raise ValueError(INV_TRAN_CODE)
 
                 authorization = None
-                for auth in storage.query_authorization(header.merchant_number, body.authorization_code):
-                    if not auth.is_captured:
-                        authorization = auth
+                for a in storage.query_authorization(header.merchant_number, body.authorization_code):
+                    if not a.is_captured:
+                        authorization = a
                         break
                 if authorization is None:
                     raise ValueError(INV_AUTH_CODE)
