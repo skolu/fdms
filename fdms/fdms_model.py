@@ -88,6 +88,9 @@ class FdmsStorage:
     def get_batch_record(self, batch_id: int, item_no: str) -> BatchRecord:
         raise NotImplementedError('%s.get_batch_record()' % self.__class__.__name__)
 
+    def query_batch_items(self, batch_id: int) -> list:
+        raise NotImplementedError('%s.query_batch_items()' % self.__class__.__name__)
+
     def put_batch_record(self, batch_record: BatchRecord):
         raise NotImplementedError('%s.put_batch_record()' % self.__class__.__name__)
 
@@ -99,6 +102,9 @@ class FdmsStorage:
 
     def put_authorization(self, authorization: Authorization):
         raise NotImplementedError('%s.put_authorization()' % self.__class__.__name__)
+
+    def close_batch(self, batch: OpenBatch, credit: (int, float), debit: (int, float)=(0, 0.0)) -> ClosedBatch:
+        raise NotImplementedError('%s.close_batch()' % self.__class__.__name__)
 
 
 def card_info_md5(card_number: str, card_expiration: str):

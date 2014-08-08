@@ -43,7 +43,9 @@ def read_fdms_packet(reader: asyncio.StreamReader) -> bytes:
 def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     online = None
     ''':type: (FdmsHeader, FdmsTransaction)'''
-    offline = []
+    add_on = None
+    ''':type: (FdmsHeader, FdmsTransaction)'''
+    offline = list()
 
     writer.write(bytes((ENQ,)))
     yield from writer.drain()
@@ -70,10 +72,11 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                     pos, header = parse_header(request)
                     txn = header.create_txn()
                     txn.parse(request[pos:])
-                    if header.txn_type == '0':
-                        if online is not None:
-                            return
-                        online = (header, txn)
+                    if header.txn_type == FdmsTransactionType.Online.value:
+                        if online is None:
+                            online = (header, txn)
+                        else:
+                            add_on = (header, txn)
                     else:
                         offline.append((header, txn))
 
@@ -94,7 +97,6 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                 attempt += 1
                 writer.write(bytes((NAK,)))
 
-
             yield from writer.drain()
 
         if online is None:
@@ -105,45 +107,54 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             rs = process_txn(txn[0], txn[1])
         offline.clear()
 
+        if add_on is not None:
+            process_add_on_txn(online, add_on)
+        add_on = None
+
         rs = process_txn(online[0], online[1])
 
         # Send Response
         rs_bytes = rs.response()
-        attempt = 0
-        while True:
-            if attempt >= 4:
-                return
 
+        if rs.action_code == FdmsActionCode.HostSpecificPoll or rs.action_code == FdmsActionCode.RevisionInquiry:
             writer.write(rs_bytes)
             yield from writer.drain()
-
-            control_byte = 0
-            try:
-                while True:
-                    rs_head = yield from asyncio.wait_for(reader.read(1), timeout=4.0)
-                    if len(rs_head) == 0:
-                        return
-                    control_byte = rs_head[0] & 0x7f
-                    if control_byte == ACK:
-                        break
-                    elif control_byte == NAK:
-                        break
-            # Close session
-            except asyncio.TimeoutError as e:
-                return
-
-            if control_byte == ACK:
-                break
-            else:
-                attempt += 1
-
-        if online[0].wcc in {'B', 'C'}:
-            # Send ENQ
-            writer.write(bytes((ENQ,)))
-            yield from writer.drain()
-            continue
         else:
-            break
+            attempt = 0
+            while True:
+                if attempt >= 4:
+                    return
+
+                writer.write(rs_bytes)
+                yield from writer.drain()
+
+                control_byte = 0
+                try:
+                    while True:
+                        rs_head = yield from asyncio.wait_for(reader.read(1), timeout=4.0)
+                        if len(rs_head) == 0:
+                            return
+                        control_byte = rs_head[0] & 0x7f
+                        if control_byte == ACK:
+                            break
+                        elif control_byte == NAK:
+                            break
+                # Close session
+                except asyncio.TimeoutError as e:
+                    return
+
+                if control_byte == ACK:
+                    break
+                else:
+                    attempt += 1
+
+            if online[0].wcc in {'B', 'C'}:
+                # Send ENQ
+                writer.write(bytes((ENQ,)))
+                yield from writer.drain()
+                continue
+            else:
+                break
 
     writer.write(bytes((EOT,)))
     yield from writer.drain()
@@ -151,7 +162,7 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         writer.write_eof()
 
 
-def sep_gen(sep, buffer, offset = 0, count = -1):
+def sep_gen(sep: int, buffer: bytes, offset=0, count=-1):
     for i in range(offset, len(buffer)):
         if count == 0:
             break
@@ -161,20 +172,32 @@ def sep_gen(sep, buffer, offset = 0, count = -1):
                 count -= 1
 
 
+def buf_chop(buffer: bytes, stops, start=0):
+    s_pos = start
+    for pos in stops:
+        yield buffer[s_pos:pos].decode()
+        s_pos = pos + 1
+    yield buffer[s_pos:].decode()
+
+
 def monetary_parse(self: MonetaryTransaction, data: bytes):
-    fs_pos = list(sep_gen(FS, data, 0, 3))
+    pos = 0
+    fs_pos = list(sep_gen(FS, data, pos, 3))
     if len(fs_pos) != 3:
         raise ValueError('Monetary: parse')
     if fs_pos[2] - (fs_pos[1] + 1) != 5:
         raise ValueError('Monetary: parse')
-
-    self.total_amount = float(data[0:fs_pos[0]].decode())
-    self.invoice_no = data[fs_pos[0]+1:fs_pos[1]].decode()
-    self.batch_no = data[fs_pos[1]+1:fs_pos[1]+2].decode()
-    self.item_no = data[fs_pos[1]+2:fs_pos[1]+5].decode()
-    self.revision_no = data[fs_pos[1]+5:fs_pos[2]].decode()
-
     pos = fs_pos[2]+1
+
+    aux_data = data[0:fs_pos[2]]
+    fs_pos.pop()
+    fields = list(buf_chop(aux_data, fs_pos))
+    self.total_amount = float(fields[0])
+    self.invoice_no = fields[1]
+    self.batch_no = fields[2][0:1]
+    self.item_no = fields[2][1:4]
+    self.revision_no = fields[2][4:5]
+
     fs_pos = list(sep_gen(FS, data, pos))
     self.format_code = data[pos:fs_pos[0]].decode()
     aux_data = bytes()
@@ -191,15 +214,19 @@ def monetary_parse(self: MonetaryTransaction, data: bytes):
         aux_data = data[fs_pos[12]+1:fs_pos[13]]
 
     if len(aux_data) > 0:
-        us_pos = list(sep_gen(US, aux_data))
-        if len(us_pos) < 7:
+        fields = list(buf_chop(aux_data, sep_gen(US, aux_data)))
+        if len(fields) < 7:
             raise ValueError('Monetary: parse')
-        self.pin_block = aux_data[0:us_pos[0]].decode()
-        self.card_type = aux_data[us_pos[0]+1:us_pos[1]].decode()
-        self.authorization_code = aux_data[us_pos[4]+1:us_pos[5]].decode()
-        self.smid_block = aux_data[us_pos[5]+1:us_pos[6]].decode()
-        if len(us_pos) > 7:
-            self.partial_indicator = aux_data[us_pos[6]+1:us_pos[7]].decode()
+        self.pin_block = fields[0]
+        self.card_type = fields[1]
+        #cashback - 2
+        #surcharge - 3
+        #voucher number - 4
+        self.authorization_code = fields[5]
+        self.smid_block = fields[6]
+        if len(fields) > 7:
+            self.partial_indicator = fields[7]
+
 
 MonetaryTransaction.parse = monetary_parse
 
@@ -214,22 +241,20 @@ SwipedMonetaryTransaction.parse = swiped_parse
 
 
 def keyed_parse(self: KeyedMonetaryTransaction, data: bytes):
-    fs_pos = list(sep_gen(FS, data, 0, 2))
+    pos = 0
+    fs_pos = list(sep_gen(FS, data, pos, 2))
     if len(fs_pos) != 2:
         raise ValueError('Keyed: parse')
 
-    field1 = data[0:fs_pos[0]]
-    e_pos = list(sep_gen(US, field1, 0))
-    s_pos = [i+1 for i in e_pos]
-    e_pos.append(len(field1))
-    s_pos.insert(0, 0)
-    fields = [field1[s:e].decode() for s, e in zip(s_pos, e_pos)]
+    data1 = data[0:fs_pos[0]]
+    fields = list(buf_chop(data1, sep_gen(US, data1)))
     if len(fields) > 2:
         self.cvv = fields[2]
     if len(fields) > 1:
         self.cv_presence = fields[1]
     if len(fields) > 0:
         self.account_no = fields[0]
+
     MonetaryTransaction.parse(self, data[fs_pos[1]+1:])
 
 KeyedMonetaryTransaction.parse = keyed_parse
@@ -258,6 +283,19 @@ def batch_close_parse(self: BatchCloseTransaction, data: bytes):
 BatchCloseTransaction.parse = batch_close_parse
 
 
+def revision_inquiry_parse(self: RevisionInquiryTransaction, data: bytes):
+    pos = data.index(FS, 0, 4)
+    self.item_no = data[0: pos].decode()
+
+    aux_data = data[pos+1, -3]
+    revisions = list(buf_chop(aux_data, sep_gen(FS, data)))
+    if len(revisions) == 10:
+        self.revisions = revisions
+    else:
+        self.revisions = ['' for i in range(10)]
+
+RevisionInquiryTransaction.parse = revision_inquiry_parse
+
 def response(self: FdmsResponse) -> bytes:
     ba = bytearray()
     ba.append(STX)
@@ -265,7 +303,7 @@ def response(self: FdmsResponse) -> bytes:
     ba.append(self.response_code.encode()[0])
     ba.append(self.batch_no.encode()[0])
     ba.extend(self.item_no.encode()[0:4])
-    ba.append('0'.encode()[0])
+    ba.append(b'0')
     ba.extend(self.body())
     ba.append(ETX)
     ba.append(functools.reduce(lambda x, y: x ^ y, ba[2:], ba[1]))
@@ -310,7 +348,7 @@ def credit_response_body(self: CreditResponse) -> bytes:
     if len(self.avc_rs_code) > 0:
         ba += self.avc_rs_code.encode()
     else:
-        ba += '0'.encode()
+        ba += b'0'
     if len(self.cvv_rs_code) > 0:
         ba += self.cvv_rs_code.encode()
     ba += bytes([FS])
@@ -326,6 +364,11 @@ def credit_response_body(self: CreditResponse) -> bytes:
 
 CreditResponse.body = credit_response_body
 
+
+def specific_poll_body(self: SpecificPollResponse) -> bytes:
+    return self.request_type.encode()
+
+SpecificPollResponse.body = specific_poll_body
 
 def parse_header(data: bytes) -> (int, FdmsHeader):
     pos = 0

@@ -9,5 +9,12 @@ class FdmsParserTest(unittest.TestCase):
         fs_pos = list(protocol.sep_gen(protocol.FS, body, 0, 5))
         self.assertEqual(len(fs_pos), 5)
 
+    def test_buffer_chop(self):
+        buffer = b'0 1 2 3 4 5 6 7 8 9'
+        digits = list(protocol.buf_chop(buffer, protocol.sep_gen(b' '[0], buffer)))
+        self.assertEqual(len(digits), 10)
+        for i in range(len(digits)):
+            self.assertEqual(digits[i], str(i))
+
 if __name__ == '__main__':
     unittest.main()

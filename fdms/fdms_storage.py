@@ -160,4 +160,18 @@ class SqlFdmsStorage(FdmsStorage):
             filter(Authorization.merchant_number == merchant_number, Authorization.authorization_code == authorization_code)
         return query.all()
 
+    def query_batch_items(self, batch_id: int) -> list:
+        query = self.session.query(BatchRecord). \
+            filter(BatchRecord.batch_id == batch_id)
+        return query.all()
 
+    def close_batch(self, batch: OpenBatch, credit: (int, float), debit: (int, float)=(0, 0.0)) -> ClosedBatch:
+        closed_batch = ClosedBatch(batch)
+        closed_batch.from_batch(batch)
+        closed_batch.credit_count = credit[0]
+        closed_batch.credit_amount = credit[1]
+        closed_batch.debit_count = debit[0]
+        closed_batch.debit_amount = debit[1]
+        self.session.add(closed_batch)
+        self.session.delete(batch)
+        self.session.flush()
