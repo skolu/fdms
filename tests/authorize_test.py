@@ -18,7 +18,7 @@ class AuthorizeTest(FdmsTestCase):
         body.account_no = '377481701087006'
         body.exp_date = '0314'
 
-        response = processor.process_txn(self.header, body)
+        response = processor.process_txn((self.header, body))
         self.assertIsInstance(response, processor.CreditResponse)
         self.assertEqual(response.response_code, '0')
         self.assertTrue(response.response_text.startswith('APPROVED'))
@@ -29,14 +29,14 @@ class AuthorizeTest(FdmsTestCase):
 
         body.item_no = '001'
         body.authorization_code = auth_code
-        response = processor.process_txn(self.header, body)
+        response = processor.process_txn((self.header, body))
         self.assertIsInstance(response, processor.CreditResponse)
         self.assertEqual(response.response_code, '0')
 
 
         self.header.txn_code = processor.FdmsTxnCode.VoidTicketOnly.value
         body.revision_no = '1'
-        response = processor.process_txn(self.header, body)
+        response = processor.process_txn((self.header, body))
         self.assertIsInstance(response, processor.CreditResponse)
         self.assertEqual(response.response_code, '0')
 
@@ -53,7 +53,7 @@ class AuthorizeTest(FdmsTestCase):
         body.revision_no = '0'
         body.track_data = '%B4393410316009875^KOLUPAEV/ SERGEY^17061211000000762000000?'
 
-        response = processor.process_txn(self.header, body)
+        response = processor.process_txn((self.header, body))
         self.assertIsInstance(response, processor.CreditResponse)
         self.assertEqual(response.response_code, '0')
         self.assertTrue(response.response_text.startswith('AUTH/TKT'))
@@ -74,7 +74,7 @@ class AuthorizeTest(FdmsTestCase):
         body.revision_no = '0'
         body.track_data = ';4393410316009875=170612110000762?'
 
-        response = processor.process_txn(self.header, body)
+        response = processor.process_txn((self.header, body))
         self.assertIsInstance(response, processor.CreditResponse)
         self.assertEqual(response.response_code, '0')
         self.assertTrue(response.response_text.startswith('RETURN'))
@@ -95,7 +95,7 @@ class AuthorizeTest(FdmsTestCase):
         body.pin_block = '<PIN BLOCK>'
         body.smid_block = '<SMID BLOCK>'
 
-        response = processor.process_txn(self.header, body)
+        response = processor.process_txn((self.header, body))
         self.assertIsInstance(response, processor.CreditResponse)
         self.assertEqual(response.response_code, '0')
         self.assertTrue(response.response_text.startswith('AUTH/TKT'))

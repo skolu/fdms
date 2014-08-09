@@ -12,10 +12,19 @@ class SettleTest(FdmsTestCase):
 
         body = processor.BatchCloseTransaction()
         body.batch_no = '0'
-        body.item_no = '004'
+        body.item_no = '005'
         body.credit_batch_amount = 10.0
         body.debit_batch_amount = 10.0
         body.debit_batch_count = 1
+
+        rs = processor.process_txn((self.header, body))
+        self.assertTrue(isinstance(rs, processor.SpecificPollResponse))
+        self.assertEqual(rs.item_no, '004')
+
+        body.item_no = '004'
+        rs = processor.process_txn((self.header, body))
+        self.assertTrue(isinstance(rs, processor.BatchResponse))
+
 
 
 def suite():

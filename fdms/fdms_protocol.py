@@ -81,6 +81,9 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                     else:
                         offline.append((header, txn))
 
+                    if header.protocol_type == '2':
+                        break
+
                     # Respond with ACK
                     attempt = 0
                     writer.write(bytes((ACK,)))
@@ -94,7 +97,7 @@ def fdms_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
 
             # Respond with NAK
             except Exception as e:
-                logging.getLogger(LOG_NAME).debug('Request error: %s', e)
+                logging.getLogger(LOG_NAME).debug('Request error: %s', str(e))
                 attempt += 1
                 writer.write(bytes((NAK,)))
 
@@ -247,7 +250,7 @@ def keyed_parse(self: KeyedMonetaryTransaction, data: bytes):
     if len(fs_pos) != 2:
         raise ValueError('Keyed: parse')
 
-    data1 = data[0:fs_pos[0]]
+    data1 = data[pos:fs_pos[0]]
     fields = list(buf_chop(data1, sep_gen(US, data1)))
     if len(fields) > 2:
         self.cvv = fields[2]
@@ -255,16 +258,19 @@ def keyed_parse(self: KeyedMonetaryTransaction, data: bytes):
         self.cv_presence = fields[1]
     if len(fields) > 0:
         self.account_no = fields[0]
+    self.exp_date = data[fs_pos[0]+1:fs_pos[1]].decode()
 
     MonetaryTransaction.parse(self, data[fs_pos[1]+1:])
 
 KeyedMonetaryTransaction.parse = keyed_parse
 
 
-def deposit_inquiry_parse(self: DepositInquiryTransaction, data: bytes):
+def skip_parse(self: FdmsTransaction, data: bytes):
     pass
 
-DepositInquiryTransaction.parse = deposit_inquiry_parse
+DepositInquiryTransaction.parse = skip_parse
+
+NegativeResponseTransaction.parse = skip_parse
 
 
 def batch_close_parse(self: BatchCloseTransaction, data: bytes):
@@ -303,7 +309,7 @@ def response(self: FdmsResponse) -> bytes:
     ba.append(self.response_code.encode()[0])
     ba.append(self.batch_no.encode()[0])
     ba.extend(self.item_no.encode()[0:4])
-    ba.append(b'0')
+    ba.append(self.revision_no.encode()[0])
     ba.extend(self.body())
     ba.append(ETX)
     ba.append(functools.reduce(lambda x, y: x ^ y, ba[2:], ba[1]))
@@ -366,7 +372,9 @@ CreditResponse.body = credit_response_body
 
 
 def specific_poll_body(self: SpecificPollResponse) -> bytes:
-    return self.request_type.encode()
+    ba = bytes([FS])
+    ba += self.request_type.encode()
+    return ba
 
 SpecificPollResponse.body = specific_poll_body
 

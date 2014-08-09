@@ -48,7 +48,7 @@ def site_net_session(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
             try:
                 frame_type, request = outer_task.result()
                 if frame_type == '22':
-                    logging.getLogger(LOG_NAME).debug('SiteNET to FDMS: %s', request)
+                    logging.getLogger(LOG_NAME).debug('SiteNET to FDMS: %s', bytes((b & 0x7f for b in request)))
                     client_info.fdms_writer.write(request)
                     yield from client_info.fdms_writer.drain()
             except asyncio.CancelledError:
