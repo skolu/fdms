@@ -4,6 +4,12 @@ from sqlalchemy.orm import mapper, sessionmaker, Session
 
 from .fdms_model import *
 
+DATABASE_NAME = 'sqlite:///:memory:'
+
+def set_database_name(name):
+    global DATABASE_NAME
+    DATABASE_NAME = name
+
 fdms_metadata = MetaData()
 
 authorization_table = Table('Authorization', fdms_metadata,
@@ -98,19 +104,23 @@ mapper(BatchRecord, batch_record_table, properties={
     'amount': batch_record_table.columns.Amount
 })
 
-
-engine = create_engine('sqlite:///:memory:', echo=True)
-
-fdms_metadata.create_all(engine)
-
-_SqlSession = sessionmaker(bind=engine)
+_SqlSession = sessionmaker()
 
 
 class SqlFdmsStorage(FdmsStorage):
+    engine = None
+
     def __init__(self):
         super().__init__()
         self.session = None
         ''':type: Session'''
+
+        if SqlFdmsStorage.engine is None:
+            global DATABASE_NAME
+            SqlFdmsStorage.engine = create_engine(DATABASE_NAME, echo=True)
+            fdms_metadata.create_all(SqlFdmsStorage.engine)
+            _SqlSession.configure(bind=SqlFdmsStorage.engine)
+
 
     def __enter__(self):
         self.session = _SqlSession()

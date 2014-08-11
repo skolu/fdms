@@ -1,18 +1,17 @@
-class A:
-    def __init__(self):
-        print('init')
-        self.a = 0
+import ctypes
+import ctypes.util
 
-    def __enter__(self):
-        print('enter')
-        self.a += 1
-        return self
+libc = ctypes.CDLL(ctypes.util.find_library('c'))
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        print('exit')
-        self.a -= 1
+libc.malloc.argtypes = [ctypes.c_int]
+libc.malloc.restype = ctypes.c_void_p
+libc.free.argtypes = [ctypes.c_void_p]
+libc.free.restype = None
 
-B = A
+b=libc.malloc(100)
+buffer=ctypes.string_at(b, 100)
+libc.free(b)
+#pb=ctypes.cast(b, ctypes.POINTER(ctypes.c_byte))
+#buffer = bytes((pb[i] for i in range(100)))
+print(buffer)
 
-with B() as a:
-    print(a)

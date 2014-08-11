@@ -3,3 +3,4 @@ workspace.xml
 tasks.xml
 misc.xml
 __pycache__/
+*.db

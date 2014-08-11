@@ -20,6 +20,7 @@ class Authorization:
 class OpenBatch:
     def __init__(self, merchant_number='', device_id='', batch_no=''):
         self.id = None
+        ''':type: int'''
         self.merchant_number = merchant_number
         self.device_id = device_id
         self.batch_no = batch_no

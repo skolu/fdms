@@ -5,6 +5,7 @@ import ssl
 import logging
 
 UNIX_SOCKET_PATH = 'fdms.1'
+
 logging.getLogger(fdms.LOG_NAME).setLevel(logging.DEBUG)
 logging.getLogger(fdms.LOG_NAME).addHandler(logging.StreamHandler())
 
@@ -20,11 +21,11 @@ def accept_site_net_client(reader, writer):
     task = asyncio.Task(asyncio.open_unix_connection(path=UNIX_SOCKET_PATH))
     asyncio.Task(fdms.site_net_session(reader, writer, task)).add_done_callback(lambda fut: writer.close())
 
-
 # Start FDMS
 if os.path.exists(UNIX_SOCKET_PATH):
     os.remove(UNIX_SOCKET_PATH)
 
+fdms.set_database_name('sqlite:///fdms.db')
 f = asyncio.start_unix_server(accept_fdms_client, path=UNIX_SOCKET_PATH)
 loop.run_until_complete(f)
 

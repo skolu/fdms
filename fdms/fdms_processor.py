@@ -221,6 +221,10 @@ class CreditResponse(FdmsTextResponse):
         self.avc_rs_code = ''
         self.cvv_rs_code = ''
         self.transaction_id = ''
+        self.balance_amount = None
+        ''':type : float'''
+        self.approved_amount = 0.0
+        self.requested_amount = 0.0
 
 
 class SpecificPollResponse(FdmsResponse):
@@ -269,7 +273,7 @@ def process_txn(transaction: (FdmsHeader, FdmsTransaction)) -> FdmsResponse:
     try:
         if isinstance(body, DepositInquiryTransaction):
             response = BatchResponse()
-            process_deposit_inquiry(header, body, response)
+            process_deposit_inquiry(header, response)
         elif isinstance(body, MonetaryTransaction):
             response = CreditResponse()
             response.item_no = body.item_no
@@ -418,8 +422,7 @@ def process_batch_close(header: FdmsHeader, body: BatchCloseTransaction) -> Fdms
     raise ValueError(CLOSE_UNAVAIL)
 
 
-# noinspection PyUnusedLocal
-def process_deposit_inquiry(header: FdmsHeader, body: DepositInquiryTransaction, response: BatchResponse):
+def process_deposit_inquiry(header: FdmsHeader, response: BatchResponse):
     with Storage() as storage:
         last_batch = storage.last_closed_batch(header.merchant_number, header.device_id)
         if last_batch is None:
@@ -546,6 +549,9 @@ def process_monetary_transaction(header: FdmsHeader, body: MonetaryTransaction, 
                     record.amount = body.total_amount
                     storage.put_batch_record(record)
                     response.transaction_id = str(record.id).zfill(10)
+                    if txn_code == FdmsTxnCode.Sale:
+                        response.approved_amount = record.amount
+                        response.requested_amount = record.amount
                     response.response_text = '%s %s' % ('AUTH/TKT' if txn_code == FdmsTxnCode.Sale else 'RETURN',
                                                         authorization.authorization_code)
                 else:

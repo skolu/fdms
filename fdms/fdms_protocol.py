@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import logging
 from .fdms_processor import *
 from . import LOG_NAME
 
@@ -365,6 +364,32 @@ def credit_response_body(self: CreditResponse) -> bytes:
             tid = tid[0:15]
         ba += tid
     ba += bytes([FS])
+    ba += bytes([FS])  # market indicator
+    if self.action_code == '3':
+        ba += b'BAL '
+        if isinstance(self.balance_amount, float):
+            amt = '{0:.2f}'.format(self.balance_amount)
+        else:
+            amt = 'UNAVAILABLE'
+        amt = amt.rjust(16, ' ')
+        ba += amt.encode()
+        if isinstance(self.balance_amount, float):
+            ba += b' ' if self.balance_amount >= 0.0 else b'-'
+        else:
+            ba += b' '
+
+        if self.requested_amount > 0.005 or self.approved_amount > 0.005:
+            ba += bytes([FS])
+            ba += b'AMT '
+            amt = '{0:.2f}'.format(self.approved_amount)
+            amt = amt.rjust(16, ' ')
+            ba += amt.encode()
+            ba += bytes([FS])
+            ba += b'REQ '
+            amt = '{0:.2f}'.format(self.requested_amount)
+            amt = amt.rjust(16, ' ')
+            ba += amt.encode()
+            ba += bytes([FS])
 
     return ba
 
