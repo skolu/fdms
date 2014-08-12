@@ -1,7 +1,8 @@
 import cffi
 import ctypes.util
 
-level_db_h = '''
+_level_db_h = '''
+
 /* Copyright (c) 2011 The LevelDB Authors. All rights reserved.
   Use of this source code is governed by a BSD-style license that can be
   found in the LICENSE file. See the AUTHORS file for names of contributors.
@@ -62,51 +63,28 @@ typedef struct leveldb_writeoptions_t  leveldb_writeoptions_t;
 
 /* DB operations */
 
-extern leveldb_t* leveldb_open(
-    const leveldb_options_t* options,
-    const char* name,
-    char** errptr);
+extern leveldb_t* leveldb_open(const leveldb_options_t* options, const char* name, char** errptr);
 
 extern void leveldb_close(leveldb_t* db);
 
-extern void leveldb_put(
-    leveldb_t* db,
-    const leveldb_writeoptions_t* options,
-    const char* key, size_t keylen,
-    const char* val, size_t vallen,
-    char** errptr);
+extern void leveldb_put(leveldb_t* db, const leveldb_writeoptions_t* options, const char* key, size_t keylen,
+                        const char* val, size_t vallen, char** errptr);
 
-extern void leveldb_delete(
-    leveldb_t* db,
-    const leveldb_writeoptions_t* options,
-    const char* key, size_t keylen,
-    char** errptr);
+extern void leveldb_delete(leveldb_t* db, const leveldb_writeoptions_t* options,
+                           const char* key, size_t keylen, char** errptr);
 
-extern void leveldb_write(
-    leveldb_t* db,
-    const leveldb_writeoptions_t* options,
-    leveldb_writebatch_t* batch,
-    char** errptr);
+extern void leveldb_write(leveldb_t* db, const leveldb_writeoptions_t* options,
+                          leveldb_writebatch_t* batch, char** errptr);
 
-/* Returns NULL if not found.  A malloc()ed array otherwise.
-   Stores the length of the array in *vallen. */
-extern char* leveldb_get(
-    leveldb_t* db,
-    const leveldb_readoptions_t* options,
-    const char* key, size_t keylen,
-    size_t* vallen,
-    char** errptr);
+/* Returns NULL if not found.  A malloc()ed array otherwise. Stores the length of the array in *vallen. */
+extern char* leveldb_get(leveldb_t* db, const leveldb_readoptions_t* options, const char* key, size_t keylen,
+                         size_t* vallen, char** errptr);
 
-extern leveldb_iterator_t* leveldb_create_iterator(
-    leveldb_t* db,
-    const leveldb_readoptions_t* options);
+extern leveldb_iterator_t* leveldb_create_iterator(leveldb_t* db, const leveldb_readoptions_t* options);
 
-extern const leveldb_snapshot_t* leveldb_create_snapshot(
-    leveldb_t* db);
+extern const leveldb_snapshot_t* leveldb_create_snapshot(leveldb_t* db);
 
-extern void leveldb_release_snapshot(
-    leveldb_t* db,
-    const leveldb_snapshot_t* snapshot);
+extern void leveldb_release_snapshot(leveldb_t* db, const leveldb_snapshot_t* snapshot);
 
 /* Returns NULL if property name is unknown.
    Else returns a pointer to a malloc()-ed null-terminated value. */
@@ -128,15 +106,9 @@ extern void leveldb_compact_range(
 
 /* Management operations */
 
-extern void leveldb_destroy_db(
-    const leveldb_options_t* options,
-    const char* name,
-    char** errptr);
+extern void leveldb_destroy_db(const leveldb_options_t* options, const char* name, char** errptr);
 
-extern void leveldb_repair_db(
-    const leveldb_options_t* options,
-    const char* name,
-    char** errptr);
+extern void leveldb_repair_db(const leveldb_options_t* options, const char* name, char** errptr);
 
 /* Iterator */
 
@@ -156,18 +128,11 @@ extern void leveldb_iter_get_error(const leveldb_iterator_t*, char** errptr);
 extern leveldb_writebatch_t* leveldb_writebatch_create();
 extern void leveldb_writebatch_destroy(leveldb_writebatch_t*);
 extern void leveldb_writebatch_clear(leveldb_writebatch_t*);
-extern void leveldb_writebatch_put(
-    leveldb_writebatch_t*,
-    const char* key, size_t klen,
-    const char* val, size_t vlen);
-extern void leveldb_writebatch_delete(
-    leveldb_writebatch_t*,
-    const char* key, size_t klen);
-extern void leveldb_writebatch_iterate(
-    leveldb_writebatch_t*,
-    void* state,
-    void (*put)(void*, const char* k, size_t klen, const char* v, size_t vlen),
-    void (*deleted)(void*, const char* k, size_t klen));
+extern void leveldb_writebatch_put(leveldb_writebatch_t*, const char* key, size_t klen, const char* val, size_t vlen);
+extern void leveldb_writebatch_delete(leveldb_writebatch_t*, const char* key, size_t klen);
+extern void leveldb_writebatch_iterate(leveldb_writebatch_t*, void* state,
+            void (*put)(void*, const char* k, size_t klen, const char* v, size_t vlen),
+            void (*deleted)(void*, const char* k, size_t klen));
 
 /* Options */
 
@@ -228,28 +193,21 @@ extern leveldb_filterpolicy_t* leveldb_filterpolicy_create(
     const char* (*name)(void*));
 extern void leveldb_filterpolicy_destroy(leveldb_filterpolicy_t*);
 
-extern leveldb_filterpolicy_t* leveldb_filterpolicy_create_bloom(
-    int bits_per_key);
+extern leveldb_filterpolicy_t* leveldb_filterpolicy_create_bloom(int bits_per_key);
 
 /* Read options */
 
 extern leveldb_readoptions_t* leveldb_readoptions_create();
 extern void leveldb_readoptions_destroy(leveldb_readoptions_t*);
-extern void leveldb_readoptions_set_verify_checksums(
-    leveldb_readoptions_t*,
-    unsigned char);
-extern void leveldb_readoptions_set_fill_cache(
-    leveldb_readoptions_t*, unsigned char);
-extern void leveldb_readoptions_set_snapshot(
-    leveldb_readoptions_t*,
-    const leveldb_snapshot_t*);
+extern void leveldb_readoptions_set_verify_checksums(leveldb_readoptions_t*, unsigned char);
+extern void leveldb_readoptions_set_fill_cache(leveldb_readoptions_t*, unsigned char);
+extern void leveldb_readoptions_set_snapshot(leveldb_readoptions_t*, const leveldb_snapshot_t*);
 
 /* Write options */
 
 extern leveldb_writeoptions_t* leveldb_writeoptions_create();
 extern void leveldb_writeoptions_destroy(leveldb_writeoptions_t*);
-extern void leveldb_writeoptions_set_sync(
-    leveldb_writeoptions_t*, unsigned char);
+extern void leveldb_writeoptions_set_sync(leveldb_writeoptions_t*, unsigned char);
 
 /* Cache */
 
@@ -279,7 +237,7 @@ extern int leveldb_minor_version();
 '''
 
 ffi = cffi.FFI()
-ffi.cdef(level_db_h)
+ffi.cdef(_level_db_h)
 
 _libname = ctypes.util.find_library('leveldb')
 ldb = ffi.dlopen(_libname)

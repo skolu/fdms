@@ -1,6 +1,6 @@
 from enum import Enum
 from .fdms_model import *
-from .fdms_storage import SqlFdmsStorage
+from .sqlite_storage import SqlFdmsStorage
 from . import LOG_NAME
 import logging
 import math
