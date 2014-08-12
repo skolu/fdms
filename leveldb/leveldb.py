@@ -111,8 +111,8 @@ class Iterator:
 
     def prev(self):
         assert self._iter_ptr is not None
-        ldb.leveldb_iter_prev(self._iter_ptr)
-        return self.valid()
+        if self.valid():
+            ldb.leveldb_iter_prev(self._iter_ptr)
 
     def seek_to_first(self):
         assert self._iter_ptr is not None
@@ -126,7 +126,7 @@ class Iterator:
         assert self._iter_ptr is not None
         void_p = ldb.leveldb_iter_key(self._iter_ptr, self._size_ptr)
         if void_p != ffi.NULL:
-            b = ffi.string(void_p, self._size_ptr[0])
+            b = bytes(ffi.buffer(void_p, self._size_ptr[0]))
             return b
         else:
             return None
@@ -135,7 +135,7 @@ class Iterator:
         assert self._iter_ptr is not None
         void_p = ldb.leveldb_iter_value(self._iter_ptr, self._size_ptr)
         if void_p != ffi.NULL:
-            b = ffi.string(void_p, self._size_ptr[0])
+            b = bytes(ffi.buffer(void_p, self._size_ptr[0]))
             return b
         else:
             return None
@@ -315,7 +315,7 @@ class DB:
         value_p = ldb.leveldb_get(self._db_ptr, options.options_ptr, key, len(key), self._size_ptr, self._error_ptr)
         self.check_error()
         if value_p != ffi.NULL:
-            value = ffi.string(value_p, self._size_ptr[0])
+            value = bytes(ffi.buffer(value_p, self._size_ptr[0]))
             ldb.leveldb_free(value_p)
             return value
         else:

@@ -69,7 +69,6 @@ class BatchRecord:
         return "<%s(batch_id='%d', item_no='%s', revision_no='%s' txn_code='%s', amount='%.2f')>" % \
                (self.__class__.__name__, self.batch_id, self.item_no, self.revision_no, self.txn_code, self.amount)
 
-
 class FdmsStorage:
     def __init__(self):
         pass
@@ -89,7 +88,7 @@ class FdmsStorage:
     def get_batch_record(self, batch_id: int, item_no: str) -> BatchRecord:
         raise NotImplementedError('%s.get_batch_record()' % self.__class__.__name__)
 
-    def query_batch_items(self, batch_id: int) -> list:
+    def query_batch_items(self, batch_id: int):
         raise NotImplementedError('%s.query_batch_items()' % self.__class__.__name__)
 
     def put_batch_record(self, batch_record: BatchRecord):

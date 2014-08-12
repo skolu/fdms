@@ -1,6 +1,7 @@
 from enum import Enum
 from .fdms_model import *
 from .sqlite_storage import SqlFdmsStorage
+from .leveldb_storage import LevelDbStorage
 from . import LOG_NAME
 import logging
 import math
@@ -233,7 +234,8 @@ class SpecificPollResponse(FdmsResponse):
         self.request_type = FdmsTransactionType.SpecificPollTransaction.value
 
 
-Storage = SqlFdmsStorage
+#Storage = SqlFdmsStorage
+Storage = LevelDbStorage
 
 INV_BATCH_SEQ = 'INV BATCH SEQ'
 INVLD_BATCH_SEQ = 'INVLD BATCH SEQ'
